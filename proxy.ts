@@ -4,7 +4,8 @@ const PRODUCTION_HOST = 'portal.hwf.zeekayeditz.com';
 
 export function proxy(request: NextRequest) {
   const forwardedProtocol = request.headers.get('x-forwarded-proto');
-  const isProductionHost = request.nextUrl.hostname === PRODUCTION_HOST;
+  const requestHost = request.headers.get('host')?.split(':')[0];
+  const isProductionHost = request.nextUrl.hostname === PRODUCTION_HOST && requestHost === PRODUCTION_HOST;
   const isPlainHttp = request.nextUrl.protocol === 'http:' || forwardedProtocol === 'http';
 
   if (isProductionHost && isPlainHttp) {

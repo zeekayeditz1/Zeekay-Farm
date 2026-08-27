@@ -7,20 +7,57 @@ type RecordRow = {
   created_at: string; updated_at: string; created_by_name?: string;
 };
 
-const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','finance','reminders']);
+const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders']);
 
 function serialize(row: RecordRow) {
   return { ...row, archived: Boolean(row.archived), data: JSON.parse(row.data || '{}') };
 }
 
-async function addAutomaticReminder(userId: string, sourceId: string, sourceModule: string, title: string, data: Record<string, unknown>) {
-  const nextDate = cleanText(data.nextDate || data.nextCheckDate || data.nextMaintenanceDate || data.expectedCalvingDate, 20);
+function addInterval(date: string, amount: number, unit: string) {
+  const result = new Date(`${date}T12:00:00Z`);
+  if (!Number.isFinite(amount) || amount <= 0 || Number.isNaN(result.getTime())) return '';
+  if (unit === 'days') result.setUTCDate(result.getUTCDate() + amount);
+  else if (unit === 'weeks') result.setUTCDate(result.getUTCDate() + amount * 7);
+  else {
+    const day = result.getUTCDate();
+    const monthIndex = result.getUTCFullYear() * 12 + result.getUTCMonth() + (unit === 'years' ? amount * 12 : amount);
+    const year = Math.floor(monthIndex / 12);
+    const month = monthIndex % 12;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    result.setUTCFullYear(year, month, Math.min(day, lastDay));
+  }
+  return result.toISOString().slice(0, 10);
+}
+
+function defaultReminderTitle(sourceModule: string, title: string, data: Record<string, unknown>) {
+  if (sourceModule === 'health') return `${cleanText(data.medicine, 80) || 'Vaccination / medicine'} — ${title}`;
+  if (sourceModule === 'breeding') return `Gestation / breeding check — ${title}`;
+  if (sourceModule === 'maintenance') return `${cleanText(data.jobType, 60) || 'Maintenance'} — ${cleanText(data.assetName, 80) || title}`;
+  if (sourceModule === 'equipment') return `Equipment service — ${title}`;
+  return `${title} — follow-up`;
+}
+
+async function addAutomaticReminder(userId: string, sourceId: string, sourceModule: string, title: string, eventDate: string, data: Record<string, unknown>) {
+  const intervalValue = Number(data.reminderIntervalValue || 0);
+  const intervalUnit = cleanText(data.reminderIntervalUnit, 10) || 'months';
+  const explicitDate = cleanText(data.reminderDate || data.nextDate || data.nextCheckDate || data.nextMaintenanceDate || data.expectedCalvingDate, 20);
+  const nextDate = explicitDate || (data.reminderEnabled === 'yes' ? addInterval(eventDate, intervalValue, intervalUnit) : '');
   if (!nextDate) return;
   const id = crypto.randomUUID();
   const now = nowIso();
+  const linkedReference = cleanText(data.animalTag || data.tag || data.assetName || data.equipmentName || data.fieldNumber || data.workerName || data.linkedReference, 100);
+  const reminderTitle = cleanText(data.reminderTitle, 150) || defaultReminderTitle(sourceModule, title, data);
   await db().prepare(
     'INSERT INTO records (id, module, title, status, event_date, linked_id, data, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).bind(id, 'reminders', title, 'upcoming', nextDate, sourceId, JSON.stringify({ sourceModule, sourceId }), userId, now, now).run();
+  ).bind(id, 'reminders', reminderTitle, 'upcoming', nextDate, sourceId, JSON.stringify({
+    sourceModule,
+    sourceId,
+    linkedReference,
+    intervalValue: intervalValue > 0 ? intervalValue : '',
+    intervalUnit,
+    recurrenceEnabled: intervalValue > 0 ? 'yes' : 'no',
+    originalEventDate: eventDate,
+  }), userId, now, now).run();
 }
 
 export async function GET(request: Request) {
@@ -76,7 +113,7 @@ export async function POST(request: Request) {
         .bind(status, now, recordKey).run();
       await audit(user.id, 'status', 'animals', null, `Marked animal ${recordKey} as ${status}`);
     }
-    if (['health','breeding','equipment'].includes(module)) await addAutomaticReminder(user.id, id, module, title, data);
+    if (module !== 'reminders') await addAutomaticReminder(user.id, id, module, title, eventDate, data);
     return jsonResponse({ id }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
@@ -92,10 +129,32 @@ export async function PATCH(request: Request) {
     const user = await requireUser(request);
     const body = await request.json() as Record<string, unknown>;
     const id = cleanText(body.id, 80);
-    const existing = await db().prepare('SELECT module, title FROM records WHERE id = ?').bind(id).first<{ module: string; title: string }>();
+    const existing = await db().prepare('SELECT id, module, title, event_date, linked_id, data FROM records WHERE id = ?').bind(id).first<{ id: string; module: string; title: string; event_date: string; linked_id: string | null; data: string }>();
     if (!existing) return errorResponse('Record not found.', 404);
     if (!canAccess(user, existing.module, true)) return errorResponse('You cannot change this record.', 403);
     const action = cleanText(body.action, 20);
+    if (action === 'complete') {
+      if (existing.module !== 'reminders') return errorResponse('Only reminders can be completed this way.');
+      const reminderData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
+      const intervalValue = Number(reminderData.intervalValue || reminderData.reminderIntervalValue || 0);
+      const intervalUnit = cleanText(reminderData.intervalUnit || reminderData.reminderIntervalUnit, 10) || 'months';
+      const completedDate = nowIso().slice(0, 10);
+      const nextDate = intervalValue > 0 ? addInterval(completedDate, intervalValue, intervalUnit) : '';
+      const now = nowIso();
+      const statements = [
+        db().prepare("UPDATE records SET archived = 1, status = 'completed', updated_at = ? WHERE id = ?").bind(now, id),
+        db().prepare('INSERT INTO audit_log (id, user_id, action, module, record_id, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .bind(crypto.randomUUID(), user.id, 'complete', 'reminders', id, `Completed ${existing.title}`, now),
+      ];
+      if (nextDate) {
+        const nextId = crypto.randomUUID();
+        statements.push(db().prepare(
+          'INSERT INTO records (id, module, title, status, event_date, linked_id, data, archived, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
+        ).bind(nextId, 'reminders', existing.title, 'upcoming', nextDate, existing.linked_id || existing.id, JSON.stringify({ ...reminderData, previousReminderId: id, lastCompletedDate: completedDate }), user.id, now, now));
+      }
+      await db().batch(statements);
+      return jsonResponse({ ok: true, nextDate: nextDate || undefined });
+    }
     if (action === 'archive' || action === 'restore') {
       if (!['owner','manager'].includes(user.role)) return errorResponse('Only an owner or manager can archive records.', 403);
       await db().prepare('UPDATE records SET archived = ?, updated_at = ? WHERE id = ?').bind(action === 'archive' ? 1 : 0, nowIso(), id).run();
