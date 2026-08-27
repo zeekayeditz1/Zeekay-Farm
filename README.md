@@ -31,3 +31,5 @@ Install dependencies with `npm install`, then use `npm run dev`. The production 
 Cloudflare resource identifiers in the deployment configuration are public binding identifiers, not credentials. No API tokens or account passwords are stored in this repository.
 
 Production requests are permanently redirected from HTTP to HTTPS and receive HSTS and standard browser security headers.
+
+Password verification uses a private Cloudflare Worker HMAC pepper, secure cookies and constant-time comparison. The pepper is stored only as a Cloudflare secret and is never committed to source control.

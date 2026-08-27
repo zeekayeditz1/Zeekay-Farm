@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import { db, ensureDatabase, FarmUser, nowIso } from './farm-db';
 
 const COOKIE = 'ali_farm_session';
@@ -35,9 +36,17 @@ export async function canCreateFirstOwner(phone: string) {
 
 export async function hashPassword(password: string, saltHex?: string) {
   const salt = saltHex ? fromHex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 150_000 }, key, 256);
-  return { hash: toHex(bits), salt: toHex(salt) };
+  if (!env.AUTH_PEPPER) throw new Error('Authentication secret is unavailable.');
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(env.AUTH_PEPPER),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const passwordBytes = encoder.encode(`${toHex(salt)}:${password}`);
+  const signature = await crypto.subtle.sign('HMAC', key, passwordBytes);
+  return { hash: toHex(signature), salt: toHex(salt) };
 }
 
 export async function verifyPassword(password: string, expectedHash: string, salt: string) {
@@ -81,16 +90,29 @@ export function canAccess(user: FarmUser, module: string, write = false) {
   return user.permissions.includes('*') || user.permissions.includes(permission) || (!write && user.permissions.includes(`${module}:write`));
 }
 
-export async function createSession(userId: string) {
+export async function prepareSession(userId: string) {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const token = toHex(bytes);
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const createdAt = nowIso();
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    tokenHash: await hashToken(token),
+    expiresAt: expires.toISOString(),
+    createdAt,
+    cookie: `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`,
+  };
+}
+
+export async function createSession(userId: string) {
+  const session = await prepareSession(userId);
   await db().batch([
     db().prepare('INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(crypto.randomUUID(), userId, await hashToken(token), expires.toISOString(), nowIso()),
-    db().prepare('UPDATE users SET last_login_at = ? WHERE id = ?').bind(nowIso(), userId),
+      .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt),
+    db().prepare('UPDATE users SET last_login_at = ? WHERE id = ?').bind(session.createdAt, userId),
   ]);
-  return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`;
+  return session.cookie;
 }
 
 export async function destroySession(request: Request) {

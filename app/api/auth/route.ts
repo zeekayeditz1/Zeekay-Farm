@@ -1,5 +1,5 @@
 import { audit, cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
-import { canCreateFirstOwner, createSession, currentUser, destroySession, hashPassword, normalizePhone, verifyPassword } from '@/lib/farm-auth';
+import { canCreateFirstOwner, createSession, currentUser, destroySession, hashPassword, normalizePhone, prepareSession, verifyPassword } from '@/lib/farm-auth';
 
 export async function GET(request: Request) {
   try {
@@ -35,11 +35,17 @@ export async function POST(request: Request) {
       if (!name) return errorResponse('Owner name is required.');
       const id = crypto.randomUUID();
       const passwordData = await hashPassword(password);
-      await db().prepare(
-        'INSERT INTO users (id, name, phone, password_hash, salt, role, permissions, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)',
-      ).bind(id, name, phone, passwordData.hash, passwordData.salt, 'owner', '["*"]', nowIso()).run();
-      await audit(id, 'setup', 'users', id, 'Created the first farm owner account');
-      return jsonResponse({ ok: true }, 201, { 'Set-Cookie': await createSession(id) });
+      const session = await prepareSession(id);
+      const now = nowIso();
+      await db().batch([
+        db().prepare('INSERT INTO users (id, name, phone, password_hash, salt, role, permissions, active, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)')
+          .bind(id, name, phone, passwordData.hash, passwordData.salt, 'owner', '["*"]', now, now),
+        db().prepare('INSERT INTO audit_log (id, user_id, action, module, record_id, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .bind(crypto.randomUUID(), id, 'setup', 'users', id, 'Created the first farm owner account', now),
+        db().prepare('INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
+          .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt),
+      ]);
+      return jsonResponse({ ok: true }, 201, { 'Set-Cookie': session.cookie });
     }
 
     if (action === 'login') {
@@ -56,7 +62,11 @@ export async function POST(request: Request) {
     }
 
     return errorResponse('Unknown authentication action.');
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Cross-site request rejected.') {
+      return errorResponse('Refresh the secure HTTPS page, then try again.', 403);
+    }
+    console.error('Ali Livestock authentication error', error instanceof Error ? error.message : 'Unknown error');
     return errorResponse('Authentication could not be completed.', 500);
   }
 }
