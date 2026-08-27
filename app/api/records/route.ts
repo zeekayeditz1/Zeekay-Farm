@@ -7,7 +7,7 @@ type RecordRow = {
   created_at: string; updated_at: string; created_by_name?: string;
 };
 
-const allowedModules = new Set(['animals','weights','health','breeding','milk','fields','gur','labour','equipment','finance','reminders']);
+const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','finance','reminders']);
 
 function serialize(row: RecordRow) {
   return { ...row, archived: Boolean(row.archived), data: JSON.parse(row.data || '{}') };
@@ -71,6 +71,11 @@ export async function POST(request: Request) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     ).bind(id, module, recordKey, title, status, eventDate, linkedId, JSON.stringify(data), user.id, now, now).run();
     await audit(user.id, 'create', module, id, `Added ${title}`);
+    if (module === 'sales' && recordKey) {
+      await db().prepare("UPDATE records SET status = ?, updated_at = ? WHERE module = 'animals' AND record_key = ? AND archived = 0")
+        .bind(status, now, recordKey).run();
+      await audit(user.id, 'status', 'animals', null, `Marked animal ${recordKey} as ${status}`);
+    }
     if (['health','breeding','equipment'].includes(module)) await addAutomaticReminder(user.id, id, module, title, data);
     return jsonResponse({ id }, 201);
   } catch (error) {

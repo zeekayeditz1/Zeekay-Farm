@@ -8,6 +8,7 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 
 - Dashboard and reminders
 - Animal profiles and permanent lifecycle history
+- Separate dated sales/exits with entry and exit age, weight and price
 - Weight estimation and editable feed calculation
 - Health, medicine, vaccination and breeding records
 - Fields, crops, sugarcane and GUR production
