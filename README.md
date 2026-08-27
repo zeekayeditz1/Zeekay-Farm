@@ -29,3 +29,5 @@ The application is built with Next.js/vinext and runs on Cloudflare Workers. Far
 Install dependencies with `npm install`, then use `npm run dev`. The production build is created with `npm run build`.
 
 Cloudflare resource identifiers in the deployment configuration are public binding identifiers, not credentials. No API tokens or account passwords are stored in this repository.
+
+Production requests are permanently redirected from HTTP to HTTPS and receive HSTS and standard browser security headers.
