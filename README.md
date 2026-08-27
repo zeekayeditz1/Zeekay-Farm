@@ -11,6 +11,7 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 - Separate dated sales/exits with entry and exit age, weight and price
 - Weight estimation and editable feed calculation
 - Health, medicine, vaccination and breeding records
+- Daily cow/buffalo milk production, use and sales
 - Fields, crops, sugarcane and GUR production
 - Labour payments and advances
 - Equipment purchase and maintenance
