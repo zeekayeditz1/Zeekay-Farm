@@ -30,6 +30,7 @@ const navIcons: Record<string, typeof LayoutDashboard> = {
   equipment: Tractor,
   maintenance: Wrench,
   finance: WalletCards,
+  dailyexpenses: BadgeDollarSign,
   reminders: BellRing,
   reports: ChartNoAxesCombined,
   users: ShieldCheck,
@@ -57,7 +58,7 @@ function addReminderInterval(date: string, amount: number, unit: string) {
 }
 
 function getRecordDate(form: Record<string,string>) {
-  return form.recordDate||form.exitDate||form.measurementDate||form.checkDate||form.matingDate||form.milkDate||form.sowingDate||form.crushingDate||form.paymentDate||form.transactionDate||form.nextDate||form.purchaseDate||today();
+  return form.recordDate||form.expenseDate||form.exitDate||form.measurementDate||form.checkDate||form.matingDate||form.milkDate||form.sowingDate||form.crushingDate||form.paymentDate||form.transactionDate||form.nextDate||form.purchaseDate||today();
 }
 
 const configs: Record<string, ModuleConfig> = {
@@ -85,6 +86,8 @@ const configs: Record<string, ModuleConfig> = {
     {key:'assetType',label:'Asset / area type',type:'select',options:['Tractor','Vehicle','Tube well','Generator','Farm machinery','Building / room','Animal shed','Fence / gate','Water system','Electrical system','Other'],required:true}, {key:'assetName',label:'Asset name / identification',required:true,placeholder:'MF 240 Tractor'}, {key:'recordDate',label:'Service / work date',type:'date',required:true}, {key:'jobType',label:'Work type',type:'select',options:['Routine service','Tuning','Oil / filter change','Repair','Part replacement','Renovation','Inspection','Cleaning','Other'],required:true}, {key:'meterHours',label:'Meter hours / odometer'}, {key:'workDone',label:'Work performed',type:'textarea',required:true}, {key:'partReplaced',label:'Part replaced / material used'}, {key:'partBrandNumber',label:'Part brand / number'}, {key:'quantity',label:'Quantity'}, {key:'serviceProvider',label:'Mechanic / contractor / shop'}, {key:'partsCost',label:'Parts / materials cost (Rs)',type:'number'}, {key:'labourCost',label:'Labour cost (Rs)',type:'number'}, {key:'otherCost',label:'Other cost (Rs)',type:'number'}, {key:'totalCost',label:'Total expense (Rs)',type:'number',required:true}, {key:'invoiceNumber',label:'Invoice / receipt number'}, {key:'warrantyUntil',label:'Part / work warranty until',type:'date'}, {key:'conditionAfter',label:'Condition after work',type:'select',options:['Excellent','Good','Working','Needs more work','Out of service']}, {key:'nextServiceAt',label:'Next service at hours / km'}, {key:'notes',label:'Maintenance / renovation notes',type:'textarea'} ] },
   finance: { label:'Income & Expenses', singular:'money record', icon:'RS', description:'A simple linked record for all money coming in or going out.', titleField:'description', fields:[
     {key:'transactionDate',label:'Date',type:'date',required:true}, {key:'type',label:'Type',type:'select',options:['Expense','Income'],required:true}, {key:'category',label:'Category',type:'select',options:['Livestock','Crop','Labour','Equipment','GUR','Milk','Other'],required:true}, {key:'description',label:'Description',required:true}, {key:'amount',label:'Amount (Rs)',type:'number',required:true}, {key:'party',label:'Paid to / received from'}, {key:'paymentMethod',label:'Payment method',type:'select',options:['Cash','Bank transfer','EasyPaisa / JazzCash','Credit / due']}, {key:'linkedReference',label:'Linked animal / field / worker / equipment'}, {key:'notes',label:'Notes / bill details',type:'textarea'} ] },
+  dailyexpenses: { label:'Daily Miscellaneous Expenses', singular:'daily expense', icon:'DE', description:'Save every small day-to-day farm expense with its date, amount and clear notes.', titleField:'expenseTitle', fields:[
+    {key:'expenseDate',label:'Expense date',type:'date',required:true}, {key:'expenseTitle',label:'What was the expense?',required:true,placeholder:'Tea for labour, rope, puncture, diesel…'}, {key:'amount',label:'Amount (Rs)',type:'number',required:true}, {key:'category',label:'Small expense category',type:'select',options:['Farm supplies','Fuel / transport','Tea / food','Animal care','Feed / fodder','Repair item','Labour support','Cleaning','Office / mobile','Other']}, {key:'paidTo',label:'Paid to / shop name'}, {key:'paymentMethod',label:'Payment method',type:'select',options:['Cash','Bank transfer','EasyPaisa / JazzCash','Credit / due']}, {key:'notes',label:'Expense notes',type:'textarea',required:true,placeholder:'Write exactly where and why this amount was spent.'} ] },
   reminders: { label:'Reminders', singular:'reminder', icon:'RE', description:'Upcoming and overdue health, crop, salary and maintenance work.', titleField:'task', fields:[
     {key:'task',label:'Task / reminder',required:true}, {key:'nextDate',label:'Due date',type:'date',required:true}, {key:'category',label:'Category',type:'select',options:['Vaccination / medicine','Gestation / breeding','Maintenance / renovation','Crop','Equipment','Labour','Other']}, {key:'linkedReference',label:'Linked animal / asset / field / worker'}, {key:'notes',label:'Instructions',type:'textarea'} ] },
 };
@@ -102,7 +105,7 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
 function AuthScreen({ setupRequired, onDone }: { setupRequired: boolean; onDone: () => void }) {
   const [name,setName] = useState('Hassaan Ali'); const [phone,setPhone] = useState(''); const [password,setPassword] = useState(''); const [error,setError] = useState(''); const [busy,setBusy] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(''); try { await api('/api/auth',{method:'POST',body:JSON.stringify({action:setupRequired?'setup':'login',name,phone,password})}); onDone(); } catch(e) { setError(e instanceof Error?e.message:'Unable to sign in.'); } finally { setBusy(false); } }
-  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark"><b>AL</b></span><div><strong>Ali Livestock</strong><small>Farm management portal</small></div></div><span className="section-kicker">{setupRequired?'Secure first-time setup':'Private farm portal'}</span><h1>{setupRequired?'Create the first owner account':'Welcome back'}</h1><p>{setupRequired?'This account receives full access. Add the second owner and selected workers afterward from Users & Access.':'Sign in with your farm phone number and password.'}</p><form onSubmit={submit}>{setupRequired&&<label>Owner name<input value={name} onChange={e=>setName(e.target.value)} required /></label>}<label>Phone number<input value={phone} onChange={e=>setPhone(e.target.value)} inputMode="tel" required placeholder="03xx xxxxxxx" /></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required placeholder="At least 10 characters" /></label>{error&&<div className="form-error" role="alert">{error}</div>}<button className="button primary full" disabled={busy}>{busy?'Please wait…':setupRequired?'Secure and open farm':'Sign in'}</button></form><small className="auth-foot">Chak No. 101 D.B · Tehsil Yazman · District Bahawalpur</small></section></main>;
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><span className="brand-mark"><b>AD</b></span><div><strong>Ali Dairies</strong><small>Farm management portal</small></div></div><span className="section-kicker">{setupRequired?'Secure first-time setup':'Private farm portal'}</span><h1>{setupRequired?'Create the first owner account':'Welcome back'}</h1><p>{setupRequired?'This account receives full access. Add the second owner and selected workers afterward from Users & Access.':'Sign in with your farm phone number and password.'}</p><form onSubmit={submit}>{setupRequired&&<label>Owner name<input value={name} onChange={e=>setName(e.target.value)} required /></label>}<label>Phone number<input value={phone} onChange={e=>setPhone(e.target.value)} inputMode="tel" required placeholder="03xx xxxxxxx" /></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required placeholder="At least 10 characters" /></label>{error&&<div className="form-error" role="alert">{error}</div>}<button className="button primary full" disabled={busy}>{busy?'Please wait…':setupRequired?'Secure and open farm':'Sign in'}</button></form><small className="auth-foot">Chak No. 101 D.B · Tehsil Yazman · District Bahawalpur</small></section></main>;
 }
 
 export default function FarmPortal() {
@@ -111,7 +114,7 @@ export default function FarmPortal() {
   const loadAuth = useCallback(async()=>{ try{const data=await api<{setupRequired:boolean;user:User|null}>('/api/auth'); setAuth({loading:false,...data});}catch{setAuth({loading:false,setupRequired:false,user:null});}},[]);
   const loadRecords = useCallback(async()=>{ if(!auth.user)return; try{const data=await api<{records:FarmRecord[]}>('/api/records');setRecords(data.records);}catch(e){setMessage(e instanceof Error?e.message:'Unable to load records.');}},[auth.user]);
   useEffect(()=>{loadAuth();},[loadAuth]); useEffect(()=>{loadRecords();},[loadRecords]);
-  if(auth.loading) return <div className="loading-page"><span className="brand-mark"><b>AL</b></span><p>Opening Ali Livestock…</p></div>;
+  if(auth.loading) return <div className="loading-page"><span className="brand-mark"><b>AD</b></span><p>Opening Ali Dairies…</p></div>;
   if(!auth.user) return <AuthScreen setupRequired={auth.setupRequired} onDone={loadAuth}/>;
   const config=configs[section];
   const sectionRecords=records.filter(record=>record.module===section && (!search || `${record.title} ${record.record_key||''} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
@@ -119,7 +122,7 @@ export default function FarmPortal() {
   async function logout(){await api('/api/auth',{method:'POST',body:JSON.stringify({action:'logout'})});setAuth({loading:false,setupRequired:false,user:null});}
   return <main className="app-shell">
     <aside className={`sidebar ${menuOpen?'open':''}`}>
-      <div className="brand"><span className="brand-mark"><b>AL</b></span><div><strong>Ali Livestock</strong><small>Farm management</small></div></div>
+      <div className="brand"><span className="brand-mark"><b>AD</b></span><div><strong>Ali Dairies</strong><small>Farm management</small></div></div>
       <nav>{navOrder.map(item=>{
         const label=configs[item]?.label||navNames[item];
         return <button type="button" title={label} aria-label={label} className={section===item?'active':''} onClick={()=>{setSection(item);setMenuOpen(false);setShowForm(false)}} key={item}><span className="nav-symbol"><FarmIcon name={item}/></span><span>{label}</span>{item==='reminders'&&dueReminderCount>0&&<b className="nav-alert">{dueReminderCount}</b>}</button>;
@@ -136,12 +139,13 @@ export default function FarmPortal() {
       <div className="page-body">
         {message&&<div className="toast" role="status">{message}<button onClick={()=>setMessage('')}>×</button></div>}
         {section==='dashboard'&&<Dashboard records={records} open={(target,add=true)=>{setSection(target);setShowForm(add)}}/>}
-        {config&&<ModulePage module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
+        {config&&section!=='finance'&&<ModulePage module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
+        {section==='finance'&&<FinancePage records={records} search={search} refresh={loadRecords} notify={setMessage}/>}
         {section==='reports'&&<Reports records={records}/>}
         {section==='users'&&<Users currentUser={auth.user} notify={setMessage}/>}
       </div>
     </section>
-    {config&&showForm&&<RecordForm module={section} config={config} onClose={()=>setShowForm(false)} onSaved={async()=>{setShowForm(false);await loadRecords();setMessage('Record and reminder saved successfully.')}}/>}
+    {config&&showForm&&section!=='finance'&&<RecordForm module={section} config={config} onClose={()=>setShowForm(false)} onSaved={async()=>{setShowForm(false);await loadRecords();setMessage('Record and reminder saved successfully.')}}/>}
   </main>;
 }
 
@@ -152,7 +156,7 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const dueToday=reminders.filter(r=>r.event_date===today());
   const thirtyDays=new Date();thirtyDays.setDate(thirtyDays.getDate()+30);const soonDate=thirtyDays.toISOString().slice(0,10);
   const dueSoon=reminders.filter(r=>r.event_date>today()&&r.event_date<=soonDate);
-  const finances=records.filter(r=>r.module==='finance');
+  const finances=records.filter(r=>r.module==='finance'||r.module==='dailyexpenses');
   const income=finances.filter(r=>r.data.type==='Income').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
   const expense=finances.filter(r=>r.data.type==='Expense').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
   const cards=[
@@ -181,11 +185,33 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   </>;
 }
 
-function ModulePage({module,config,records,onAdd,refresh,notify}:{module:string;config:ModuleConfig;records:FarmRecord[];onAdd:()=>void;refresh:()=>Promise<void>;notify:(x:string)=>void}){
+function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];search:string;refresh:()=>Promise<void>;notify:(x:string)=>void}){
+  const [tab,setTab]=useState<'finance'|'dailyexpenses'>('finance');
+  const [showForm,setShowForm]=useState(false);
+  const config=configs[tab];
+  const filtered=records.filter(record=>record.module===tab&&(!search||`${record.title} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
+  const dailyRecords=records.filter(record=>record.module==='dailyexpenses');
+  const todayTotal=dailyRecords.filter(record=>record.event_date===today()).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const currentMonth=today().slice(0,7);
+  const monthTotal=dailyRecords.filter(record=>record.event_date.startsWith(currentMonth)).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  function switchTab(next:'finance'|'dailyexpenses'){setTab(next);setShowForm(false)}
+  return <>
+    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div><button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button></div>
+    <div className="finance-subtabs" role="tablist" aria-label="Income and expense sections">
+      <button className={tab==='finance'?'active':''} onClick={()=>switchTab('finance')} role="tab" aria-selected={tab==='finance'}><span><WalletCards size={18}/></span><div><strong>Income & expense ledger</strong><small>Regular income, purchases and major payments</small></div></button>
+      <button className={tab==='dailyexpenses'?'active':''} onClick={()=>switchTab('dailyexpenses')} role="tab" aria-selected={tab==='dailyexpenses'}><span><BadgeDollarSign size={18}/></span><div><strong>Daily miscellaneous expenses</strong><small>Chota mota farm kharcha with date and notes</small></div><b>{dailyRecords.length}</b></button>
+    </div>
+    {tab==='dailyexpenses'&&<div className="daily-expense-summary"><span>Spent today<strong>{money(todayTotal)}</strong></span><span>This month<strong>{money(monthTotal)}</strong></span><span>Saved entries<strong>{dailyRecords.length}</strong></span></div>}
+    <ModulePage module={tab} config={config} records={filtered} onAdd={()=>setShowForm(true)} refresh={refresh} notify={notify} embedded/>
+    {showForm&&<RecordForm module={tab} config={config} onClose={()=>setShowForm(false)} onSaved={async()=>{setShowForm(false);await refresh();notify(tab==='dailyexpenses'?'Daily miscellaneous expense saved.':'Income or expense record saved.')}}/>}
+  </>;
+}
+
+function ModulePage({module,config,records,onAdd,refresh,notify,embedded=false}:{module:string;config:ModuleConfig;records:FarmRecord[];onAdd:()=>void;refresh:()=>Promise<void>;notify:(x:string)=>void;embedded?:boolean}){
   async function archive(id:string){if(!confirm('Archive this record? Its dated history will be preserved.'))return;try{await api('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'archive'})});await refresh();notify('Record archived.');}catch(e){notify(e instanceof Error?e.message:'Unable to archive.')}}
   async function complete(id:string){try{const result=await api<{nextDate?:string}>('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'complete'})});await refresh();notify(result.nextDate?`Completed. Next reminder scheduled for ${result.nextDate}.`:'Reminder completed.');}catch(e){notify(e instanceof Error?e.message:'Unable to complete reminder.')}}
   return <>
-    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div><button className="button primary" onClick={onAdd}>+ Add {config.singular}</button></div>
+    {!embedded&&<div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div><button className="button primary" onClick={onAdd}>+ Add {config.singular}</button></div>}
     <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records remain in the audit history.'}</p></div><button onClick={()=>window.print()}>Print</button></div>
       {records.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Status</th><th>Entered by</th><th></th></tr></thead><tbody>{records.map(r=>{
         const reminderState=module==='reminders'?(r.event_date<today()?'Overdue':r.event_date===today()?'Due today':'Upcoming'):r.status;
@@ -196,7 +222,7 @@ function ModulePage({module,config,records,onAdd,refresh,notify}:{module:string;
 }
 
 function RecordForm({module,config,onClose,onSaved}:{module:string;config:ModuleConfig;onClose:()=>void;onSaved:()=>void}){
-  const primaryDateKeys=new Set(['purchaseDate','exitDate','measurementDate','checkDate','matingDate','milkDate','sowingDate','crushingDate','paymentDate','transactionDate','recordDate','nextDate']);
+  const primaryDateKeys=new Set(['purchaseDate','exitDate','measurementDate','checkDate','matingDate','milkDate','sowingDate','crushingDate','paymentDate','transactionDate','expenseDate','recordDate','nextDate']);
   const initial=Object.fromEntries(config.fields.map(f=>[f.key,f.type==='date'&&primaryDateKeys.has(f.key)?today():f.key==='greenPercent'?'10':f.key==='dryPercent'?'2':f.key==='concentratePercent'?'1':'']));
   const [form,setForm]=useState<Record<string,string>>(initial);
   const [status,setStatus]=useState(config.statusOptions?.[0]||'Active');
@@ -225,7 +251,7 @@ function RecordForm({module,config,onClose,onSaved}:{module:string;config:Module
     e.preventDefault();setBusy(true);setError('');
     try{
       if(reminderEnabled&&!computedReminderDate&&module!=='reminders')throw new Error('Choose an exact reminder date or enter a repeat interval.');
-      const data={...form,reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:computedReminderDate,reminderIntervalValue,reminderIntervalUnit,...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:{})};
+      const data={...form,...(module==='dailyexpenses'?{type:'Expense',expenseKind:'Daily miscellaneous'}:{}),reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:computedReminderDate,reminderIntervalValue,reminderIntervalUnit,...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:{})};
       const title=form[config.titleField]||config.singular;
       const saved=await api<{id:string}>('/api/records',{method:'POST',body:JSON.stringify({module,title,recordKey:config.keyField?form[config.keyField]:null,status,eventDate,data})});
       if(attachment){const upload=new FormData();upload.append('recordId',saved.id);upload.append('file',attachment);await api('/api/upload',{method:'POST',body:upload});}
@@ -248,9 +274,9 @@ function RecordForm({module,config,onClose,onSaved}:{module:string;config:Module
 }
 
 function Reports({records}:{records:FarmRecord[]}){
-  const finance=records.filter(r=>r.module==='finance'); const income=finance.filter(r=>r.data.type==='Income').reduce((s,r)=>s+Number(r.data.amount||0),0); const expense=finance.filter(r=>r.data.type==='Expense').reduce((s,r)=>s+Number(r.data.amount||0),0); const animals=records.filter(r=>r.module==='animals'); const sold=animals.filter(r=>r.status==='Sold').length;
-  function csv(){const rows=[['Module','Date','Reference','Status','Data'],...records.map(r=>[r.module,r.event_date,r.record_key||r.title,r.status,JSON.stringify(r.data)])];const text=rows.map(row=>row.map(cell=>`"${String(cell).replaceAll('"','""')}"`).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));a.download=`ali-livestock-report-${today()}.csv`;a.click();URL.revokeObjectURL(a.href)}
-  return <><div className="page-heading"><div><span className="section-kicker">Farm decisions</span><h1>Reports</h1><p>Essential farm summaries for owners, viewing, printing and download.</p></div><div className="button-row"><button className="button" onClick={()=>window.print()}>Print / PDF</button><button className="button primary" onClick={csv}>Download Excel CSV</button></div></div><div className="metric-grid"><article className="metric"><span>Total income</span><strong>{money(income)}</strong><small>All recorded farm income</small></article><article className="metric"><span>Total expenses</span><strong>{money(expense)}</strong><small>All recorded farm costs</small></article><article className="metric"><span>Net profit / loss</span><strong>{money(income-expense)}</strong><small>Income minus expenses</small></article><article className="metric"><span>Animals sold</span><strong>{sold}</strong><small>Preserved in animal history</small></article></div><section className="panel report-list"><div className="panel-heading"><div><h2>Available reports</h2><p>Each report is calculated from the same connected daily records.</p></div></div>{[['Animals','Animal list, status and complete lifecycle history'],['Weight & growth','Measurement history, gain/loss and feed suggestions'],['Health & breeding','Medicine, vaccines, pregnancy and calving'],['Fields & crops','Field-wise costs, yield and profit/loss'],['Sugarcane & GUR','Daily output, seasonal production and profit'],['Labour','Salary, payments, advances and remaining balance'],['Equipment','Current equipment condition and ownership details'],['Renovation & maintenance','Dated service, tuning, repairs, replaced parts, vendors and costs'],['Money','Monthly income, expense and farm profit/loss']].map(([a,b])=><div key={a}><strong>{a}</strong><span>{b}</span></div>)}</section></>;
+  const finance=records.filter(r=>r.module==='finance'||r.module==='dailyexpenses'); const income=finance.filter(r=>r.data.type==='Income').reduce((s,r)=>s+Number(r.data.amount||0),0); const expense=finance.filter(r=>r.data.type==='Expense').reduce((s,r)=>s+Number(r.data.amount||0),0); const animals=records.filter(r=>r.module==='animals'); const sold=animals.filter(r=>r.status==='Sold').length;
+  function csv(){const rows=[['Module','Date','Reference','Status','Data'],...records.map(r=>[r.module,r.event_date,r.record_key||r.title,r.status,JSON.stringify(r.data)])];const text=rows.map(row=>row.map(cell=>`"${String(cell).replaceAll('"','""')}"`).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));a.download=`ali-dairies-report-${today()}.csv`;a.click();URL.revokeObjectURL(a.href)}
+  return <><div className="page-heading"><div><span className="section-kicker">Farm decisions</span><h1>Reports</h1><p>Essential farm summaries for owners, viewing, printing and download.</p></div><div className="button-row"><button className="button" onClick={()=>window.print()}>Print / PDF</button><button className="button primary" onClick={csv}>Download Excel CSV</button></div></div><div className="metric-grid"><article className="metric"><span>Total income</span><strong>{money(income)}</strong><small>All recorded farm income</small></article><article className="metric"><span>Total expenses</span><strong>{money(expense)}</strong><small>Includes daily miscellaneous expenses</small></article><article className="metric"><span>Net profit / loss</span><strong>{money(income-expense)}</strong><small>Income minus every recorded expense</small></article><article className="metric"><span>Animals sold</span><strong>{sold}</strong><small>Preserved in animal history</small></article></div><section className="panel report-list"><div className="panel-heading"><div><h2>Available reports</h2><p>Each report is calculated from the same connected daily records.</p></div></div>{[['Animals','Animal list, status and complete lifecycle history'],['Weight & growth','Measurement history, gain/loss and feed suggestions'],['Health & breeding','Medicine, vaccines, pregnancy and calving'],['Fields & crops','Field-wise costs, yield and profit/loss'],['Sugarcane & GUR','Daily output, seasonal production and profit'],['Labour','Salary, payments, advances and remaining balance'],['Equipment','Current equipment condition and ownership details'],['Renovation & maintenance','Dated service, tuning, repairs, replaced parts, vendors and costs'],['Daily miscellaneous expenses','Every small dated farm expense with amount and notes'],['Money','Monthly income, every expense and farm profit/loss']].map(([a,b])=><div key={a}><strong>{a}</strong><span>{b}</span></div>)}</section></>;
 }
 
 function Users({currentUser,notify}:{currentUser:User;notify:(s:string)=>void}){

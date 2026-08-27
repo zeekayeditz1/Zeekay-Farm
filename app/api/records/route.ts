@@ -7,7 +7,11 @@ type RecordRow = {
   created_at: string; updated_at: string; created_by_name?: string;
 };
 
-const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders']);
+const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']);
+
+function permissionModule(module: string) {
+  return module === 'dailyexpenses' ? 'finance' : module;
+}
 
 function serialize(row: RecordRow) {
   return { ...row, archived: Boolean(row.archived), data: JSON.parse(row.data || '{}') };
@@ -68,7 +72,7 @@ export async function GET(request: Request) {
     const module = cleanText(url.searchParams.get('module'), 30);
     const search = cleanText(url.searchParams.get('search'), 80);
     if (module && !allowedModules.has(module)) return errorResponse('Unknown farm section.');
-    if (module && !canAccess(user, module)) return errorResponse('You do not have access to this section.', 403);
+    if (module && !canAccess(user, permissionModule(module))) return errorResponse('You do not have access to this section.', 403);
     const clauses = ['r.archived = 0'];
     const bindings: unknown[] = [];
     if (module) { clauses.push('r.module = ?'); bindings.push(module); }
@@ -77,7 +81,7 @@ export async function GET(request: Request) {
       `SELECT r.*, u.name AS created_by_name FROM records r LEFT JOIN users u ON u.id = r.created_by
        WHERE ${clauses.join(' AND ')} ORDER BY r.event_date DESC, r.created_at DESC LIMIT 500`,
     ).bind(...bindings).all<RecordRow>();
-    const visible = user.role === 'owner' ? result.results : result.results.filter((row) => canAccess(user, row.module));
+    const visible = user.role === 'owner' ? result.results : result.results.filter((row) => canAccess(user, permissionModule(row.module)));
     return jsonResponse({ records: visible.map(serialize) });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
@@ -93,7 +97,7 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const module = cleanText(body.module, 30);
     if (!allowedModules.has(module)) return errorResponse('Unknown farm section.');
-    if (!canAccess(user, module, true)) return errorResponse('You cannot add records in this section.', 403);
+    if (!canAccess(user, permissionModule(module), true)) return errorResponse('You cannot add records in this section.', 403);
     const title = cleanText(body.title, 150);
     const recordKey = cleanText(body.recordKey, 80) || null;
     const status = cleanText(body.status, 30) || 'active';
@@ -131,7 +135,7 @@ export async function PATCH(request: Request) {
     const id = cleanText(body.id, 80);
     const existing = await db().prepare('SELECT id, module, title, event_date, linked_id, data FROM records WHERE id = ?').bind(id).first<{ id: string; module: string; title: string; event_date: string; linked_id: string | null; data: string }>();
     if (!existing) return errorResponse('Record not found.', 404);
-    if (!canAccess(user, existing.module, true)) return errorResponse('You cannot change this record.', 403);
+    if (!canAccess(user, permissionModule(existing.module), true)) return errorResponse('You cannot change this record.', 403);
     const action = cleanText(body.action, 20);
     if (action === 'complete') {
       if (existing.module !== 'reminders') return errorResponse('Only reminders can be completed this way.');

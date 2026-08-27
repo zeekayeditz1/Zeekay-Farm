@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     if (action === 'setup') {
       const count = await db().prepare('SELECT COUNT(*) AS count FROM users').first<{ count: number }>();
       if (Number(count?.count || 0) !== 0) return errorResponse('Farm setup is already complete.', 409);
-      if (!await canCreateFirstOwner(phone)) return errorResponse('Use one of the registered Ali Livestock owner phone numbers for first-time setup.', 403);
+      if (!await canCreateFirstOwner(phone)) return errorResponse('Use one of the registered Ali Dairies owner phone numbers for first-time setup.', 403);
       const name = cleanText(body.name, 100);
       if (!name) return errorResponse('Owner name is required.');
       const id = crypto.randomUUID();
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === 'Cross-site request rejected.') {
       return errorResponse('Refresh the secure HTTPS page, then try again.', 403);
     }
-    console.error('Ali Livestock authentication error', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Ali Dairies authentication error', error instanceof Error ? error.message : 'Unknown error');
     return errorResponse('Authentication could not be completed.', 500);
   }
 }
