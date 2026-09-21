@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { AuthError, requireUser } from '@/lib/farm-auth';
+import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
 import { audit, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
 const allowedTypes = new Set(['image/jpeg','image/png','image/webp','application/pdf']);
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get('file');
     const recordId = String(form.get('recordId') || '').slice(0, 80) || null;
+    await requireRecordAccess(request, recordId, true);
     if (!(file instanceof File)) return errorResponse('Choose a photo, bill, receipt or PDF.');
     if (!allowedTypes.has(file.type)) return errorResponse('Only JPG, PNG, WebP and PDF files are accepted.');
     if (file.size > 8 * 1024 * 1024) return errorResponse('The file must be smaller than 8 MB.');
@@ -33,12 +34,19 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    await requireUser(request);
-    const id = new URL(request.url).searchParams.get('id')?.slice(0, 80);
+    const url = new URL(request.url);
+    const recordId = url.searchParams.get('recordId');
+    if (recordId) {
+      await requireRecordAccess(request, recordId, false);
+      const files = await db().prepare('SELECT id, filename, content_type, size FROM files WHERE record_id = ? ORDER BY created_at').bind(recordId).all();
+      return jsonResponse({files:files.results});
+    }
+    const id = url.searchParams.get('id')?.slice(0, 80);
     if (!id) return errorResponse('Choose an attachment.');
-    const row = await db().prepare('SELECT object_key, filename, content_type FROM files WHERE id = ?').bind(id)
-      .first<{ object_key: string; filename: string; content_type: string }>();
+    const row = await db().prepare('SELECT object_key, filename, content_type, record_id FROM files WHERE id = ?').bind(id)
+      .first<{ object_key: string; filename: string; content_type: string; record_id: string }>();
     if (!row) return errorResponse('Attachment not found.', 404);
+    await requireRecordAccess(request, row.record_id, false);
     const value = await env.FILES.get(row.object_key, 'arrayBuffer');
     if (!value) return errorResponse('Attachment data is unavailable.', 404);
     return new Response(value, {
@@ -52,5 +60,31 @@ export async function GET(request: Request) {
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
     return errorResponse('The attachment could not be opened.', 500);
+  }
+}
+
+async function requireRecordAccess(request: Request, id: string | null, write: boolean) {
+  const user = await requireUser(request);
+  const record = id ? await db().prepare('SELECT module FROM records WHERE id = ? AND archived = 0').bind(id).first<{module:string}>() : null;
+  if (!record) throw new AuthError('Record not found.',404);
+  if (!canAccess(user,record.module === 'dailyexpenses' ? 'finance' : record.module,write)) throw new AuthError('You cannot access this attachment.',403);
+  return user;
+}
+
+export async function DELETE(request: Request) {
+  try {
+    validateOrigin(request);
+    await ensureDatabase();
+    const body = await request.json() as {id?:string};
+    const file = await db().prepare('SELECT record_id, object_key, filename FROM files WHERE id = ?').bind(String(body.id||'').slice(0,80)).first<{record_id:string;object_key:string;filename:string}>();
+    if (!file) return errorResponse('Attachment not found.',404);
+    const user = await requireRecordAccess(request,file.record_id,true);
+    await env.FILES.delete(file.object_key);
+    await db().prepare('DELETE FROM files WHERE id = ?').bind(body.id).run();
+    await audit(user.id,'delete','files',body.id||null,`Deleted attachment ${file.filename}`);
+    return jsonResponse({ok:true});
+  } catch(error) {
+    if (error instanceof AuthError) return errorResponse(error.message,error.status);
+    return errorResponse('The attachment could not be deleted.',500);
   }
 }

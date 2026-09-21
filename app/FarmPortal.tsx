@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Baby, BadgeDollarSign, Beef, BellRing, CalendarClock, ChartNoAxesCombined,
   CircleUserRound, LayoutDashboard, Milk, Scale,
@@ -9,6 +9,9 @@ import {
 
 type User = { id: string; name: string; phone: string; role: string; permissions: string[] };
 type FarmRecord = { id: string; module: string; record_key: string | null; title: string; status: string; event_date: string; linked_id: string | null; data: Record<string, string | number>; created_by_name?: string };
+const UserContext=createContext<User|null>(null);
+function mayWrite(user:User|null, section:string){return Boolean(user&&(user.role==='owner'||user.permissions.includes('*')||user.permissions.includes((section==='dailyexpenses'?'finance':section)+':write')))}
+
 type Field = { key: string; label: string; type?: 'text'|'number'|'date'|'select'|'textarea'; options?: string[]; required?: boolean; placeholder?: string };
 type ModuleConfig = { label: string; singular: string; description: string; icon: string; fields: Field[]; keyField?: string; titleField: string; statusOptions?: string[] };
 
@@ -57,8 +60,8 @@ function addReminderInterval(date: string, amount: number, unit: string) {
   return result.toISOString().slice(0, 10);
 }
 
-function getRecordDate(form: Record<string,string>) {
-  return form.recordDate||form.expenseDate||form.exitDate||form.measurementDate||form.checkDate||form.matingDate||form.milkDate||form.sowingDate||form.crushingDate||form.paymentDate||form.transactionDate||form.nextDate||form.purchaseDate||today();
+function getRecordDate(form: Record<string,string>, fallback=today()) {
+  return form.recordDate||form.expenseDate||form.exitDate||form.measurementDate||form.checkDate||form.matingDate||form.milkDate||form.sowingDate||form.crushingDate||form.paymentDate||form.transactionDate||form.nextDate||form.purchaseDate||fallback;
 }
 
 const configs: Record<string, ModuleConfig> = {
@@ -113,6 +116,8 @@ export default function FarmPortal() {
   const [section,setSection] = useState('dashboard'); const [records,setRecords] = useState<FarmRecord[]>([]); const [search,setSearch] = useState(''); const [showForm,setShowForm] = useState(false); const [message,setMessage] = useState(''); const [menuOpen,setMenuOpen] = useState(false);
   const loadAuth = useCallback(async()=>{ try{const data=await api<{setupRequired:boolean;user:User|null}>('/api/auth'); setAuth({loading:false,...data});}catch{setAuth({loading:false,setupRequired:false,user:null});}},[]);
   const loadRecords = useCallback(async()=>{ if(!auth.user)return; try{const data=await api<{records:FarmRecord[]}>('/api/records');setRecords(data.records);}catch(e){setMessage(e instanceof Error?e.message:'Unable to load records.');}},[auth.user]);
+  // These effects load external server data; their state updates happen after the request.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(()=>{loadAuth();},[loadAuth]); useEffect(()=>{loadRecords();},[loadRecords]);
   if(auth.loading) return <div className="loading-page"><span className="brand-mark"><b>AD</b></span><p>Opening Ali Dairies…</p></div>;
   if(!auth.user) return <AuthScreen setupRequired={auth.setupRequired} onDone={loadAuth}/>;
@@ -120,7 +125,7 @@ export default function FarmPortal() {
   const sectionRecords=records.filter(record=>record.module===section && (!search || `${record.title} ${record.record_key||''} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
   const dueReminderCount=records.filter(record=>record.module==='reminders'&&record.event_date<=today()).length;
   async function logout(){await api('/api/auth',{method:'POST',body:JSON.stringify({action:'logout'})});setAuth({loading:false,setupRequired:false,user:null});}
-  return <main className="app-shell">
+  return <UserContext.Provider value={auth.user}><main className="app-shell">
     <aside className={`sidebar ${menuOpen?'open':''}`}>
       <div className="brand"><span className="brand-mark"><b>AD</b></span><div><strong>Ali Dairies</strong><small>Farm management</small></div></div>
       <nav>{navOrder.map(item=>{
@@ -139,14 +144,14 @@ export default function FarmPortal() {
       <div className="page-body">
         {message&&<div className="toast" role="status">{message}<button onClick={()=>setMessage('')}>×</button></div>}
         {section==='dashboard'&&<Dashboard records={records} open={(target,add=true)=>{setSection(target);setShowForm(add)}}/>}
-        {config&&section!=='finance'&&<ModulePage module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
+        {config&&section!=='finance'&&<ModulePage key={section} module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
         {section==='finance'&&<FinancePage records={records} search={search} refresh={loadRecords} notify={setMessage}/>}
         {section==='reports'&&<Reports records={records}/>}
         {section==='users'&&<Users currentUser={auth.user} notify={setMessage}/>}
       </div>
     </section>
     {config&&showForm&&section!=='finance'&&<RecordForm module={section} config={config} onClose={()=>setShowForm(false)} onSaved={async()=>{setShowForm(false);await loadRecords();setMessage('Record and reminder saved successfully.')}}/>}
-  </main>;
+  </main></UserContext.Provider>;
 }
 
 function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add?:boolean)=>void}){
@@ -202,75 +207,101 @@ function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];searc
       <button className={tab==='dailyexpenses'?'active':''} onClick={()=>switchTab('dailyexpenses')} role="tab" aria-selected={tab==='dailyexpenses'}><span><BadgeDollarSign size={18}/></span><div><strong>Daily miscellaneous expenses</strong><small>Chota mota farm kharcha with date and notes</small></div><b>{dailyRecords.length}</b></button>
     </div>
     {tab==='dailyexpenses'&&<div className="daily-expense-summary"><span>Spent today<strong>{money(todayTotal)}</strong></span><span>This month<strong>{money(monthTotal)}</strong></span><span>Saved entries<strong>{dailyRecords.length}</strong></span></div>}
-    <ModulePage module={tab} config={config} records={filtered} onAdd={()=>setShowForm(true)} refresh={refresh} notify={notify} embedded/>
+    <ModulePage key={tab} module={tab} config={config} records={filtered} onAdd={()=>setShowForm(true)} refresh={refresh} notify={notify} embedded/>
     {showForm&&<RecordForm module={tab} config={config} onClose={()=>setShowForm(false)} onSaved={async()=>{setShowForm(false);await refresh();notify(tab==='dailyexpenses'?'Daily miscellaneous expense saved.':'Income or expense record saved.')}}/>}
   </>;
 }
 
 function ModulePage({module,config,records,onAdd,refresh,notify,embedded=false}:{module:string;config:ModuleConfig;records:FarmRecord[];onAdd:()=>void;refresh:()=>Promise<void>;notify:(x:string)=>void;embedded?:boolean}){
+  const [editing,setEditing]=useState<FarmRecord|null>(null);
+  const [deleting,setDeleting]=useState<FarmRecord|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [deleteError,setDeleteError]=useState('');
+  const user=useContext(UserContext);
+  const canWrite=mayWrite(user,module);
+  async function remove(){if(!deleting||busy)return;setBusy(true);setDeleteError('');try{await api('/api/records',{method:'DELETE',body:JSON.stringify({id:deleting.id})});setDeleting(null);await refresh();notify('Record deleted.');}catch(e){setDeleteError(e instanceof Error?e.message:'Unable to delete.')}finally{setBusy(false)}}
   async function archive(id:string){if(!confirm('Archive this record? Its dated history will be preserved.'))return;try{await api('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'archive'})});await refresh();notify('Record archived.');}catch(e){notify(e instanceof Error?e.message:'Unable to archive.')}}
   async function complete(id:string){try{const result=await api<{nextDate?:string}>('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'complete'})});await refresh();notify(result.nextDate?`Completed. Next reminder scheduled for ${result.nextDate}.`:'Reminder completed.');}catch(e){notify(e instanceof Error?e.message:'Unable to complete reminder.')}}
   return <>
-    {!embedded&&<div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div><button className="button primary" onClick={onAdd}>+ Add {config.singular}</button></div>}
+    {!embedded&&<div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add {config.singular}</button>}</div>}
     <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records remain in the audit history.'}</p></div><button onClick={()=>window.print()}>Print</button></div>
-      {records.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Status</th><th>Entered by</th><th></th></tr></thead><tbody>{records.map(r=>{
+      {records.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Status</th><th>Entered by</th><th className="actions-cell">Actions</th></tr></thead><tbody>{records.map(r=>{
         const reminderState=module==='reminders'?(r.event_date<today()?'Overdue':r.event_date===today()?'Due today':'Upcoming'):r.status;
-        return <tr key={r.id}><td className="nowrap">{r.event_date}</td><td><strong>{r.record_key||r.title}</strong></td><td><span className="record-detail">{Object.entries(r.data).filter(([key,v])=>v&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,4).map(([k,v])=>`${k.replace(/([A-Z])/g,' $1')}: ${v}`).join(' · ')}</span></td><td><span className={`status-chip ${String(reminderState).toLowerCase().replace(' ','-')}`}>{reminderState}</span></td><td>{r.created_by_name||'Farm user'}</td><td><div className="row-actions">{module==='reminders'&&<button className="row-action complete" onClick={()=>complete(r.id)}>Done {(r.data.intervalValue||r.data.reminderIntervalValue)?'& next':''}</button>}<button className="row-action" onClick={()=>archive(r.id)}>Archive</button></div></td></tr>;
+        return <tr key={r.id}><td className="nowrap">{r.event_date}</td><td><strong>{r.record_key||r.title}</strong></td><td><span className="record-detail">{Object.entries(r.data).filter(([key,v])=>v&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,4).map(([k,v])=>`${k.replace(/([A-Z])/g,' $1')}: ${v}`).join(' · ')}</span></td><td><span className={`status-chip ${String(reminderState).toLowerCase().replace(' ','-')}`}>{reminderState}</span></td><td>{r.created_by_name||'Farm user'}</td><td className="actions-cell"><div className="row-actions">{canWrite&&<><button className="row-action edit" onClick={()=>setEditing(r)} aria-label={`Edit ${r.record_key||r.title}`}>Edit</button><button className="row-action danger" onClick={()=>{setDeleteError('');setDeleting(r)}} aria-label={`Delete ${r.record_key||r.title}`}>Delete</button>{module==='reminders'&&<button className="row-action complete" onClick={()=>complete(r.id)}>Done {(r.data.intervalValue||r.data.reminderIntervalValue)?'& next':''}</button>}{['owner','manager'].includes(user?.role||'')&&<button className="row-action" onClick={()=>archive(r.id)}>Archive</button>}</>}{!canWrite&&<span>View only</span>}</div></td></tr>;
       })}</tbody></table></div>:<Empty title={`No ${config.label.toLowerCase()} yet`} text={`Add the first ${config.singular} to start this farm history.`}/>}
     </section>
+    {editing&&<RecordForm key={editing.id} module={module} config={config} record={editing} onClose={()=>setEditing(null)} onSaved={async()=>{setEditing(null);await refresh();notify('Changes saved.')}}/>}
+    {deleting&&<div className="modal-backdrop"><section className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><h2 id="delete-title">Delete {config.singular}?</h2><p id="delete-description"><strong>{deleting.record_key||deleting.title}</strong> · {deleting.event_date}<br/>This removes the entry from the portal and reports, along with its pending reminders. Other farm records stay intact. A private audit copy is kept.</p>{deleteError&&<p className="form-error" role="alert">{deleteError}</p>}<div className="button-row"><button autoFocus className="button" disabled={busy} onClick={()=>setDeleting(null)}>Cancel</button><button className="button danger-button" disabled={busy} onClick={remove}>{busy?'Deleting…':'Delete record'}</button></div></section></div>}
   </>;
 }
 
-function RecordForm({module,config,onClose,onSaved}:{module:string;config:ModuleConfig;onClose:()=>void;onSaved:()=>void}){
+function RecordForm({module,config,record,onClose,onSaved}:{module:string;config:ModuleConfig;record?:FarmRecord;onClose:()=>void;onSaved:()=>void}){
   const primaryDateKeys=new Set(['purchaseDate','exitDate','measurementDate','checkDate','matingDate','milkDate','sowingDate','crushingDate','paymentDate','transactionDate','expenseDate','recordDate','nextDate']);
-  const initial=Object.fromEntries(config.fields.map(f=>[f.key,f.type==='date'&&primaryDateKeys.has(f.key)?today():f.key==='greenPercent'?'10':f.key==='dryPercent'?'2':f.key==='concentratePercent'?'1':'']));
+  const initial=Object.fromEntries(config.fields.map(f=>[f.key,record?String(record.data[f.key]??(f.key===config.titleField?record.title:f.key==='nextDate'&&module==='reminders'?record.event_date:'')):f.type==='date'&&primaryDateKeys.has(f.key)?today():f.key==='greenPercent'?'10':f.key==='dryPercent'?'2':f.key==='concentratePercent'?'1':'']));
   const [form,setForm]=useState<Record<string,string>>(initial);
-  const [status,setStatus]=useState(config.statusOptions?.[0]||'Active');
+  const [status,setStatus]=useState(record?.status||config.statusOptions?.[0]||'Active');
   const [attachment,setAttachment]=useState<File|null>(null);
-  const [reminderEnabled,setReminderEnabled]=useState(['health','breeding','equipment','maintenance','reminders'].includes(module));
-  const [reminderTitle,setReminderTitle]=useState('');
-  const [reminderIntervalValue,setReminderIntervalValue]=useState('');
-  const [reminderIntervalUnit,setReminderIntervalUnit]=useState('months');
-  const [reminderExactDate,setReminderExactDate]=useState('');
+  const [reminderEnabled,setReminderEnabled]=useState(record?module==='reminders'?Number(record.data.intervalValue||record.data.reminderIntervalValue||0)>0:record.data.reminderEnabled==='yes'||(record.data.reminderEnabled!=='no'&&Boolean(record.data.nextDate||record.data.nextMaintenanceDate||record.data.expectedCalvingDate)):['health','breeding','equipment','maintenance','reminders'].includes(module));
+  const [reminderTitle,setReminderTitle]=useState(String(record?.data.reminderTitle||''));
+  const [reminderIntervalValue,setReminderIntervalValue]=useState(String(record?.data.intervalValue||record?.data.reminderIntervalValue||''));
+  const [reminderIntervalUnit,setReminderIntervalUnit]=useState(String(record?.data.intervalUnit||record?.data.reminderIntervalUnit||'months'));
+  const [reminderExactDate,setReminderExactDate]=useState(String(record?.data.reminderDate||''));
+  const [savedId,setSavedId]=useState(record?.id||'');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const estimated=useMemo(()=>{if(module!=='weights')return null;const girth=Number(form.heartGirth),length=Number(form.bodyLength),scale=Number(form.scaleWeight);const weight=scale||(girth&&length?(girth*girth*length)/10840:0);return weight?{weight,green:weight*Number(form.greenPercent||10)/100,dry:weight*Number(form.dryPercent||2)/100,concentrate:weight*Number(form.concentratePercent||1)/100}:null},[module,form]);
-  const eventDate=getRecordDate(form);
+  const eventDate=getRecordDate(form,record?.event_date||today());
   const builtInNextDate=form.nextDate||form.nextMaintenanceDate||form.expectedCalvingDate||form.pregnancyCheckDate||'';
   const computedReminderDate=reminderExactDate||builtInNextDate||addReminderInterval(eventDate,Number(reminderIntervalValue),reminderIntervalUnit);
   const suggestedReminderTitle=module==='health'?`${form.medicine||'Vaccination / medicine'} — ${form.animalTag||'animal'}`:module==='breeding'?`Gestation / breeding check — ${form.animalTag||'animal'}`:module==='maintenance'?`${form.jobType||'Maintenance'} — ${form.assetName||'farm asset'}`:module==='equipment'?`Equipment service — ${form.equipmentName||'equipment'}`:module==='reminders'?form.task||'Farm reminder':`${config.label} follow-up — ${form[config.titleField]||config.singular}`;
-  useEffect(()=>{
-    const gestationDays:Record<string,number>={Cow:283,Buffalo:310,Goat:150,Sheep:147};
-    const days=gestationDays[form.animalType];
-    if(module==='breeding'&&form.matingDate&&days&&!form.expectedCalvingDate){
-      const d=new Date(`${form.matingDate}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+days);
-      setForm(prev=>({...prev,expectedCalvingDate:d.toISOString().slice(0,10)}));
-    }
-  },[module,form.animalType,form.matingDate,form.expectedCalvingDate]);
+  function changeField(key:string,value:string){
+    setForm(previous=>{
+      const next={...previous,[key]:value};
+      const days=({Cow:283,Buffalo:310,Goat:150,Sheep:147} as Record<string,number>)[next.animalType];
+      if(module==='breeding'&&['matingDate','animalType'].includes(key)&&next.matingDate&&days&&!next.expectedCalvingDate){
+        const date=new Date(next.matingDate+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+days);next.expectedCalvingDate=date.toISOString().slice(0,10);
+      }
+      return next;
+    });
+  }
   async function submit(e:FormEvent){
     e.preventDefault();setBusy(true);setError('');
     try{
       if(reminderEnabled&&!computedReminderDate&&module!=='reminders')throw new Error('Choose an exact reminder date or enter a repeat interval.');
-      const data={...form,...(module==='dailyexpenses'?{type:'Expense',expenseKind:'Daily miscellaneous'}:{}),reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:computedReminderDate,reminderIntervalValue,reminderIntervalUnit,...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:{})};
+      const data={...record?.data,...form,...(module==='dailyexpenses'?{type:'Expense',expenseKind:'Daily miscellaneous'}:{}),reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:computedReminderDate,reminderIntervalValue:reminderEnabled?reminderIntervalValue:'',reminderIntervalUnit,...(module==='reminders'?{intervalValue:reminderEnabled?reminderIntervalValue:'',intervalUnit:reminderIntervalUnit,recurrenceEnabled:reminderEnabled&&Number(reminderIntervalValue)>0?'yes':'no'}:{}),...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:module==='weights'?{estimatedWeight:'',dailyGreenFodder:'',dailyDryFodder:'',dailyConcentrate:'',weightNotice:''}:{})};
       const title=form[config.titleField]||config.singular;
-      const saved=await api<{id:string}>('/api/records',{method:'POST',body:JSON.stringify({module,title,recordKey:config.keyField?form[config.keyField]:null,status,eventDate,data})});
+      const saved=await api<{id:string}>('/api/records',{method:savedId?'PATCH':'POST',body:JSON.stringify({id:savedId||undefined,module,title,recordKey:config.keyField?form[config.keyField]:null,status,eventDate,data})});
+      setSavedId(saved.id);
       if(attachment){const upload=new FormData();upload.append('recordId',saved.id);upload.append('file',attachment);await api('/api/upload',{method:'POST',body:upload});}
       onSaved();
     }catch(e){setError(e instanceof Error?e.message:'Unable to save.')}finally{setBusy(false)}
   }
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><section className="record-modal" role="dialog" aria-modal="true" aria-label={`Add ${config.singular}`}>
-    <header><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> New farm record</span><h2>Add {config.singular}</h2><p>{config.description}</p></div><button onClick={onClose} aria-label="Close">×</button></header>
+  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)onClose()}}><section className="record-modal" role="dialog" aria-modal="true" aria-label={`${record?'Edit':'Add'} ${config.singular}`}>
+    <header><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> {record?'Edit farm record':'New farm record'}</span><h2>{record?'Edit':'Add'} {config.singular}</h2><p>{config.description}</p></div><button disabled={busy} onClick={onClose} aria-label="Close">×</button></header>
     <form onSubmit={submit}>
-      <div className="form-grid">{config.fields.map(field=><label className={field.type==='textarea'?'wide':''} key={field.key}>{field.label}{field.required&&<em>*</em>}{field.type==='select'?<select value={form[field.key]} onChange={e=>setForm({...form,[field.key]:e.target.value})} required={field.required}><option value="">Choose…</option>{field.options?.map(o=><option key={o}>{o}</option>)}</select>:field.type==='textarea'?<textarea value={form[field.key]} onChange={e=>setForm({...form,[field.key]:e.target.value})} rows={3}/>:<input type={field.type||'text'} value={form[field.key]} onChange={e=>setForm({...form,[field.key]:e.target.value})} required={field.required} placeholder={field.placeholder}/>}</label>)}{config.statusOptions&&<label>Current status<select value={status} onChange={e=>setStatus(e.target.value)}>{config.statusOptions.map(o=><option key={o}>{o}</option>)}</select></label>}<label className="wide">Photo, bill, receipt or PDF (optional)<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e=>setAttachment(e.target.files?.[0]||null)}/><small>Use your phone camera or gallery. Maximum 8 MB.</small></label></div>
+      <div className="form-grid">{config.fields.map(field=><label className={field.type==='textarea'?'wide':''} key={field.key}>{field.label}{field.required&&<em>*</em>}{field.type==='select'?<select value={form[field.key]} onChange={e=>changeField(field.key,e.target.value)} required={field.required}><option value="">Choose…</option>{form[field.key]&&!field.options?.includes(form[field.key])&&<option value={form[field.key]}>{form[field.key]}</option>}{field.options?.map(o=><option key={o}>{o}</option>)}</select>:field.type==='textarea'?<textarea required={field.required} value={form[field.key]} onChange={e=>changeField(field.key,e.target.value)} rows={3}/>:<input step={field.type==='number'?'any':undefined} type={field.type||'text'} value={form[field.key]} onChange={e=>changeField(field.key,e.target.value)} required={field.required} placeholder={field.placeholder}/>}</label>)}{config.statusOptions&&<label>Current status<select value={status} onChange={e=>setStatus(e.target.value)}>{!config.statusOptions.includes(status)&&<option value={status}>{status}</option>}{config.statusOptions.map(o=><option key={o}>{o}</option>)}</select></label>}<label className="wide">Photo, bill, receipt or PDF (optional)<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e=>setAttachment(e.target.files?.[0]||null)}/><small>Use your phone camera or gallery. Maximum 8 MB.</small></label></div>
+      {record&&<Attachments recordId={record.id}/>}
       {estimated&&<div className="calculator-result"><span>Estimated live weight<strong>{estimated.weight.toFixed(1)} kg</strong><small>Measurement estimate, not an exact scale weight</small></span><span>Green fodder<strong>{estimated.green.toFixed(1)} kg/day</strong></span><span>Dry fodder<strong>{estimated.dry.toFixed(1)} kg/day</strong></span><span>Concentrate<strong>{estimated.concentrate.toFixed(1)} kg/day</strong></span></div>}
       <section className={`reminder-builder ${reminderEnabled?'enabled':''}`}>
         <div className="reminder-builder-heading"><span><CalendarClock size={20}/></span><div><strong>{module==='reminders'?'Repeat this reminder':'Remind me when this is needed again'}</strong><small>Works for vaccination, medicine, gestation, service, renovation and every other record.</small></div><label className="toggle"><input type="checkbox" checked={reminderEnabled} onChange={e=>setReminderEnabled(e.target.checked)}/><i/></label></div>
         {reminderEnabled&&<><div className="reminder-grid"><label>Reminder title<input value={reminderTitle} onChange={e=>setReminderTitle(e.target.value)} placeholder={suggestedReminderTitle}/></label><label>Repeat after<input type="number" min="1" value={reminderIntervalValue} onChange={e=>setReminderIntervalValue(e.target.value)} placeholder="Example: 6"/></label><label>Days / months / years<select value={reminderIntervalUnit} onChange={e=>setReminderIntervalUnit(e.target.value)}><option value="days">Days</option><option value="weeks">Weeks</option><option value="months">Months</option><option value="years">Years</option></select></label><label>Exact first reminder date<input type="date" value={reminderExactDate} onChange={e=>setReminderExactDate(e.target.value)}/></label></div><div className="reminder-preview"><BellRing size={16}/><span>{computedReminderDate?<>Next reminder: <strong>{computedReminderDate}</strong>{reminderIntervalValue&&<> · repeats every {reminderIntervalValue} {reminderIntervalUnit}</>}</>:<>Choose an exact date or a repeat interval.</>}</span></div></>}
       </section>
       {error&&<div className="form-error">{error}</div>}
-      <footer><button type="button" className="button" onClick={onClose}>Cancel</button><button className="button primary" disabled={busy}>{busy?'Saving…':'Save record'}</button></footer>
+      <footer><button type="button" className="button" disabled={busy} onClick={onClose}>Cancel</button><button className="button primary" disabled={busy}>{busy?'Saving…':record?'Save changes':'Save record'}</button></footer>
     </form>
   </section></div>;
+}
+
+function Attachments({recordId}:{recordId:string}){
+  const [files,setFiles]=useState<Array<{id:string;filename:string}>>([]);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState('');
+  const load=useCallback(async()=>{try{setFiles((await api<{files:Array<{id:string;filename:string}>}>(`/api/upload?recordId=${encodeURIComponent(recordId)}`)).files)}catch(e){setError(e instanceof Error?e.message:'Unable to load attachments.')}},[recordId]);
+  // Load external server data when the selected record or account changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{load()},[load]);
+  async function remove(id:string){if(!confirm('Delete this attachment? You can upload a replacement using the file field above.'))return;setBusy(id);setError('');try{await api('/api/upload',{method:'DELETE',body:JSON.stringify({id})});await load()}catch(e){setError(e instanceof Error?e.message:'Unable to delete attachment.')}finally{setBusy('')}}
+  return <section className="attachment-list"><h3>Saved attachments</h3>{files.length?files.map(file=><div key={file.id}><a href={`/api/upload?id=${encodeURIComponent(file.id)}`} target="_blank" rel="noreferrer">{file.filename}</a><button type="button" className="row-action danger" disabled={Boolean(busy)} onClick={()=>remove(file.id)}>{busy===file.id?'Deleting…':'Delete attachment'}</button></div>):<p>No saved attachments.</p>}{error&&<p role="alert" className="form-error">{error}</p>}</section>;
 }
 
 function Reports({records}:{records:FarmRecord[]}){
@@ -280,11 +311,42 @@ function Reports({records}:{records:FarmRecord[]}){
 }
 
 function Users({currentUser,notify}:{currentUser:User;notify:(s:string)=>void}){
-  const [users,setUsers]=useState<Array<Record<string,unknown>>>([]); const [show,setShow]=useState(false); const [form,setForm]=useState({name:'Wasim Ali',phone:'',password:'',role:'owner'});
-  const load=useCallback(async()=>{if(currentUser.role!=='owner')return;try{setUsers((await api<{users:Array<Record<string,unknown>>}>('/api/users')).users)}catch(e){notify(e instanceof Error?e.message:'Unable to load users.')}},[currentUser.role,notify]);useEffect(()=>{load()},[load]);
-  async function add(e:FormEvent){e.preventDefault();try{const permissions=form.role==='owner'?['*']:['animals:read','animals:write','weights:read','weights:write','health:read','health:write','breeding:read','breeding:write','maintenance:read','maintenance:write','reminders:read','reminders:write'];await api('/api/users',{method:'POST',body:JSON.stringify({...form,permissions})});setShow(false);setForm({name:'',phone:'',password:'',role:'worker'});await load();notify('Portal user added.')}catch(e){notify(e instanceof Error?e.message:'Unable to add user.')}}
+  const [users,setUsers]=useState<Array<Record<string,unknown>>>([]);
+  const [show,setShow]=useState(false);
+  const [editing,setEditing]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [form,setForm]=useState({name:'',phone:'',password:'',role:'worker'});
+  const load=useCallback(async()=>{if(currentUser.role!=='owner')return;try{setUsers((await api<{users:Array<Record<string,unknown>>}>('/api/users')).users)}catch(e){notify(e instanceof Error?e.message:'Unable to load users.')}},[currentUser.role,notify]);
+  // Load external server data when the selected record or account changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{load()},[load]);
+  function edit(user?:Record<string,unknown>){setEditing(user?String(user.id):'');setForm({name:String(user?.name||''),phone:String(user?.phone||''),password:'',role:String(user?.role||'worker')});setError('');setShow(true)}
+  async function save(e:FormEvent){
+    e.preventDefault();setBusy(true);setError('');
+    try{
+      const sections=['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders'];
+      const scoped=form.role==='accountant'?['finance','labour','sales']:form.role==='vet'?['animals','weights','health','breeding','reminders']:form.role==='worker'?['animals','weights','health','breeding','maintenance','reminders']:sections;
+      const permissions=form.role==='owner'?['*']:scoped.flatMap(section=>form.role==='viewer'?[section+':read']:[section+':read',section+':write']);
+      await api('/api/users',{method:editing?'PATCH':'POST',body:JSON.stringify({...form,id:editing||undefined,permissions})});setShow(false);await load();notify(editing?'User changes saved.':'Portal user added.');
+    }catch(e){setError(e instanceof Error?e.message:'Unable to save user.')}finally{setBusy(false)}
+  }
+  async function remove(user:Record<string,unknown>){
+    if(!confirm('Delete portal user '+String(user.name)+'? Their sign-in access will be removed. Records they entered will be preserved.'))return;
+    setBusy(true);try{await api('/api/users',{method:'DELETE',body:JSON.stringify({id:user.id})});await load();notify('Portal user deleted.')}catch(e){notify(e instanceof Error?e.message:'Unable to delete user.')}finally{setBusy(false)}
+  }
   if(currentUser.role!=='owner')return <Empty title="Owner access only" text="Only farm owners can manage user accounts and permissions."/>;
-  return <><div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><a className="button" href="/api/backup">Download backup</a><button className="button primary" onClick={()=>setShow(!show)}>+ Add portal user</button></div></div>{show&&<section className="panel inline-form"><h2>Add owner or worker</h2><form onSubmit={add}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></label><label>Phone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} required/></label><label>Temporary password<input type="password" minLength={10} value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/></label><label>Role<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="owner">Owner - full access</option><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="vet">Veterinarian</option><option value="worker">Farm worker</option><option value="viewer">View only</option></select></label><button className="button primary">Add user</button></form></section>}<section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Role</th><th>Status</th><th>Last sign in</th></tr></thead><tbody>{users.map(u=><tr key={String(u.id)}><td><strong>{String(u.name)}</strong></td><td>{String(u.phone)}</td><td>{String(u.role)}</td><td><span className="status-chip">{Number(u.active)?'Active':'Disabled'}</span></td><td>{u.last_login_at?String(u.last_login_at).slice(0,10):'Never'}</td></tr>)}</tbody></table></div></section></>;
+  return <>
+    <div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><a className="button" href="/api/backup">Download backup</a><button className="button primary" onClick={()=>edit()}>+ Add portal user</button></div></div>
+    {show&&<section className="panel inline-form"><h2>{editing?'Edit portal user':'Add portal user'}</h2><form onSubmit={save}>
+      <label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></label>
+      <label>Phone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} required/></label>
+      <label>{editing?'New password (optional)':'Temporary password'}<input type="password" autoComplete="new-password" minLength={10} value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required={!editing}/>{editing&&<small>Leave blank to keep the current password.</small>}</label>
+      <label>Role<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="owner">Owner - full access</option><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="vet">Veterinarian</option><option value="worker">Farm worker</option><option value="viewer">View only</option></select></label>
+      {error&&<p className="form-error" role="alert">{error}</p>}<div className="button-row"><button type="button" className="button" disabled={busy} onClick={()=>setShow(false)}>Cancel</button><button className="button primary" disabled={busy}>{busy?'Saving…':editing?'Save changes':'Add user'}</button></div>
+    </form></section>}
+    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Role</th><th>Status</th><th>Last sign in</th><th className="actions-cell">Actions</th></tr></thead><tbody>{users.map(u=><tr key={String(u.id)}><td><strong>{String(u.name)}</strong></td><td>{String(u.phone)}</td><td>{String(u.role)}</td><td><span className="status-chip">{Number(u.active)?'Active':'Disabled'}</span></td><td>{u.last_login_at?String(u.last_login_at).slice(0,10):'Never'}</td><td className="actions-cell"><div className="row-actions"><button className="row-action edit" disabled={busy} onClick={()=>edit(u)}>Edit</button>{u.id!==currentUser.id&&<button className="row-action danger" disabled={busy} onClick={()=>remove(u)}>Delete</button>}</div></td></tr>)}</tbody></table></div></section>
+  </>;
 }
 
 function Empty({title,text,compact=false}:{title:string;text:string;compact?:boolean}){return <div className={`empty ${compact?'compact':''}`}><span>✓</span><h3>{title}</h3><p>{text}</p></div>}

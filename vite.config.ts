@@ -12,7 +12,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const localBindingConfig = {
   name: 'ali-livestock-portal',
   main: 'vinext/server/app-router-entry',
-  compatibility_date: '2026-08-27',
+  compatibility_date: process.env.FARM_LOCAL_COMPATIBILITY_DATE || '2026-08-27',
   compatibility_flags: ['nodejs_compat'],
   routes: [{ pattern: 'portal.hwf.zeekayeditz.com', custom_domain: true }],
   d1_databases: d1
