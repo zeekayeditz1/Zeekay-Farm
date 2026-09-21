@@ -67,7 +67,14 @@ async function changeUser(request: Request, removing: boolean) {
       const password = cleanText(body.password,200);
       if (!name || !phone) return errorResponse('Name and phone are required.');
       if (password && password.length < 10) return errorResponse('Use at least 10 characters for a new password.');
-      const existingPermissions = (() => { try { return JSON.parse(existing.permissions || '[]') as string[]; } catch { return []; } })();
+      const existingPermissions = (() => {
+        try {
+          const parsed = JSON.parse(existing.permissions || '[]');
+          return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+        } catch {
+          return [];
+        }
+      })();
       const permissions = JSON.stringify(normalizePermissions(body.permissions, role, role === existing.role ? existingPermissions : []));
       statements.push(db().prepare('UPDATE users SET name = ?, phone = ?, role = ?, permissions = ? WHERE id = ?').bind(name,phone,role,permissions,id));
       if (password) {
