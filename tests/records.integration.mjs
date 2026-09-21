@@ -49,6 +49,11 @@ try {
     await request('/api/records','PATCH',{id,title:'Should not resurrect'},404);
   }
   await request('/api/records','POST',{module:'finance',title:'Invalid date',status:'Active',eventDate:'2026-02-31',data:{amount:'1'}},400);
+  await request('/api/records','POST',{module:'animals',title:'Missing tag',status:'Active',eventDate:'2026-09-21',data:{tag:''}},400);
+  const fieldHistoryName=prefix+'-field-history';
+  await request('/api/records','POST',{module:'fields',title:fieldHistoryName,status:'Active',eventDate:'2026-09-19',data:{fieldNumber:fieldHistoryName,cropName:'Wheat'}},201);
+  await request('/api/records','POST',{module:'fields',title:fieldHistoryName,status:'Active',eventDate:'2026-09-20',data:{fieldNumber:fieldHistoryName,cropName:'Cotton'}},201);
+  check((await records()).filter(record=>record.module==='fields'&&record.title===fieldHistoryName).length===2,'Multiple crop seasons can share the same field number');
   const pageOne=(await request('/api/records?limit=1&offset=0')).result;
   check(pageOne.records.length===1&&pageOne.hasMore===true&&pageOne.nextOffset===1,'Record API pagination returns a safe next offset');
   const animal=await add('animals',{tag:prefix,animalType:'Cow',breed:'Sahiwal',sex:'Female',purchaseDate:'2026-09-21'},prefix,'Pregnant');
