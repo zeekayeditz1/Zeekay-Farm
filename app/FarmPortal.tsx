@@ -304,6 +304,132 @@ function downloadFarmReport(records:FarmRecord[]){
   });
 }
 
+function sectionSummaryRows(module:string,records:FarmRecord[]):Array<Array<string|number>>{
+  const rows:Array<Array<string|number>>=[
+    ['Saved records',records.length,'Current visible records in this section'],
+    ['Latest record',records.length?[...records].sort((a,b)=>b.event_date.localeCompare(a.event_date))[0].event_date:'-','Most recent saved date'],
+  ];
+  const sum=(key:string)=>records.reduce((total,record)=>total+Number(record.data[key]||0),0);
+  if(module==='sales'){
+    rows.push(['Total sale / exit value',money(sum('salePrice')),'Recorded sale/value amounts']);
+    rows.push(['Net result',money(sum('netResult')),'Combined recorded profit/loss']);
+  }else if(module==='health'){
+    rows.push(['Health / medicine cost',money(sum('cost')),'Combined recorded treatment cost']);
+  }else if(module==='milk'){
+    const litres=records.reduce((total,record)=>total+Number(record.data.totalLitres||Number(record.data.morningLitres||0)+Number(record.data.eveningLitres||0)),0);
+    rows.push(['Total milk',`${litres.toLocaleString('en-PK')} L`,'Combined recorded production']);
+    rows.push(['Milk sale income',money(sum('saleIncome')),'Combined recorded milk income']);
+  }else if(module==='fields'){
+    const costKeys=['seedCost','cultivationCost','fertilizerCost','sprayCost','irrigationCost','labourCost','otherCost'];
+    const costs=records.reduce((total,record)=>total+costKeys.reduce((sub,key)=>sub+Number(record.data[key]||0),0),0);
+    rows.push(['Recorded crop costs',money(costs),'Seed, cultivation, fertilizer, spray, irrigation, labour and other']);
+    rows.push(['Sale income',money(sum('saleIncome')),'Combined field sale income']);
+  }else if(module==='gur'){
+    rows.push(['GUR produced',sum('gurProduced').toLocaleString('en-PK'),'Combined recorded production']);
+    rows.push(['Sale income',money(sum('saleIncome')),'Combined GUR sale income']);
+  }else if(module==='labour'){
+    rows.push(['Recorded payments / advances',money(sum('amount')),'Combined saved labour amounts']);
+    rows.push(['Remaining balances',money(sum('remainingBalance')),'Combined saved remaining balances']);
+  }else if(module==='equipment'){
+    rows.push(['Equipment purchase value',money(sum('purchasePrice')),'Combined recorded purchase prices']);
+    rows.push(['Maintenance cost',money(sum('cost')),'Combined recorded equipment maintenance']);
+  }else if(module==='maintenance'){
+    rows.push(['Maintenance / renovation spend',money(sum('totalCost')),'Combined recorded expenses']);
+  }else if(module==='finance'){
+    const income=records.filter(record=>record.data.type==='Income').reduce((total,record)=>total+Number(record.data.amount||0),0);
+    const expense=records.filter(record=>record.data.type==='Expense').reduce((total,record)=>total+Number(record.data.amount||0),0);
+    rows.push(['Income',money(income),'Income entries in this view']);
+    rows.push(['Expenses',money(expense),'Expense entries in this view']);
+    rows.push(['Net result',money(income-expense),'Income minus expenses']);
+  }else if(module==='dailyexpenses'){
+    rows.push(['Total miscellaneous spend',money(sum('amount')),'Combined small day-to-day expenses']);
+  }else if(module==='reminders'){
+    const overdue=records.filter(record=>record.event_date<today()).length;
+    const dueToday=records.filter(record=>record.event_date===today()).length;
+    rows.push(['Overdue',overdue,'Past due reminders']);
+    rows.push(['Due today',dueToday,'Reminders due today']);
+    rows.push(['Upcoming',Math.max(0,records.length-overdue-dueToday),'Future reminders']);
+  }else if(module==='breeding'){
+    rows.push(['Positive pregnancy checks',records.filter(record=>record.data.pregnancyResult==='Positive').length,'Saved positive results']);
+    rows.push(['Recorded births',records.filter(record=>record.data.actualCalvingDate||record.data.breedingEvent==='Calving / birth').length,'Records with an actual birth']);
+  }else if(module==='weights'){
+    rows.push(['Animals measured',new Set(records.map(record=>String(record.data.animalTag||record.title))).size,'Unique animal references']);
+  }
+  return rows;
+}
+
+function downloadSectionPdf(module:string,config:ModuleConfig,records:FarmRecord[]){
+  if(module==='animals'){downloadLivestockSheet(records);return}
+  createAliDairiesPdf({
+    title:`${config.label} Report`,
+    subtitle:config.description,
+    fileBase:`ali-dairies-${module.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}`,
+    summaryTitle:`${config.label} summary`,
+    summaryColumns:[
+      {label:'Metric',width:230},
+      {label:'Value',width:190},
+      {label:'Notes',width:360},
+    ],
+    summaryRows:sectionSummaryRows(module,records),
+    detailTitle:`${config.label} details`,
+    detailColumns:[
+      {label:'Date',width:75},
+      {label:'Reference',width:130},
+      {label:'Status',width:78},
+      {label:'Entered by',width:105},
+      {label:'Details',width:392},
+    ],
+    detailRows:records.map(record=>[
+      record.event_date,
+      record.record_key||record.title,
+      module==='reminders'?(record.event_date<today()?'Overdue':record.event_date===today()?'Due today':'Upcoming'):record.status,
+      record.created_by_name||'Farm user',
+      Object.entries(record.data)
+        .filter(([key,value])=>value&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit','reminderIntervalUnit'].includes(key))
+        .slice(0,9)
+        .map(([key,value])=>`${key.replace(/([A-Z])/g,' $1')}: ${value}`)
+        .join(' | '),
+    ]),
+  });
+}
+
+function downloadUsersPdf(users:Array<Record<string,unknown>>){
+  createAliDairiesPdf({
+    title:'Users & Access Report',
+    subtitle:'Portal user accounts, roles and access status',
+    fileBase:'ali-dairies-users-access',
+    summaryTitle:'User access summary',
+    summaryColumns:[
+      {label:'Metric',width:250},
+      {label:'Value',width:180},
+      {label:'Notes',width:350},
+    ],
+    summaryRows:[
+      ['Total portal users',users.length,'All listed portal accounts'],
+      ['Active users',users.filter(user=>Number(user.active)).length,'Accounts currently enabled'],
+      ['Disabled users',users.filter(user=>!Number(user.active)).length,'Accounts currently disabled'],
+      ['Owners',users.filter(user=>String(user.role)==='owner').length,'Accounts with owner role'],
+    ],
+    detailTitle:'Portal users',
+    detailColumns:[
+      {label:'Name',width:180},
+      {label:'Phone',width:150},
+      {label:'Role',width:120},
+      {label:'Status',width:105},
+      {label:'Last sign in',width:150},
+      {label:'Created',width:75},
+    ],
+    detailRows:users.map(user=>[
+      String(user.name||''),
+      String(user.phone||''),
+      String(user.role||''),
+      Number(user.active)?'Active':'Disabled',
+      user.last_login_at?String(user.last_login_at).slice(0,19).replace('T',' '):'Never',
+      user.created_at?String(user.created_at).slice(0,10):'',
+    ]),
+  });
+}
+
 const navIcons: Record<string, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
   animals: Beef,
@@ -460,7 +586,7 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const upcoming=reminders.slice(0,6);
   const urgent=[...overdue,...dueToday];
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>Good morning</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><button className="button primary" onClick={()=>open('animals')}>+ Add animal</button></div>
+    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>Good morning</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><div className="button-row"><button className="button" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button><button className="button primary" onClick={()=>open('animals')}>+ Add animal</button></div></div>
     {urgent.length>0&&<section className="dashboard-alert" role="status"><span><BellRing size={22}/></span><div><strong>{urgent.length} farm task{urgent.length===1?' needs':'s need'} attention</strong><p>{overdue.length?`${overdue.length} overdue. `:''}{dueToday.length?`${dueToday.length} due today.`:''} Open reminders to complete them and automatically schedule the next repeat.</p></div><button onClick={()=>open('reminders',false)}>Review reminders</button></section>}
     <div className="metric-grid">{cards.map(([label,value,note])=><article className="metric" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div>
     <div className="content-grid">
@@ -511,7 +637,7 @@ function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];searc
   const monthTotal=dailyRecords.filter(record=>record.event_date.startsWith(currentMonth)).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
   function switchTab(next:'finance'|'dailyexpenses'){setTab(next);setShowForm(false)}
   return <>
-    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div>{canWrite&&<button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button>}</div>
+    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div><div className="button-row"><button className="button" onClick={()=>downloadSectionPdf(tab,config,filtered)}>Download A4 PDF</button>{canWrite&&<button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button>}</div></div>
     <div className="finance-subtabs" role="tablist" aria-label="Income and expense sections">
       <button className={tab==='finance'?'active':''} onClick={()=>switchTab('finance')} role="tab" aria-selected={tab==='finance'}><span><WalletCards size={18}/></span><div><strong>Income & expense ledger</strong><small>Regular income, purchases and major payments</small></div></button>
       <button className={tab==='dailyexpenses'?'active':''} onClick={()=>switchTab('dailyexpenses')} role="tab" aria-selected={tab==='dailyexpenses'}><span><BadgeDollarSign size={18}/></span><div><strong>Daily miscellaneous expenses</strong><small>Chota mota farm kharcha with date and notes</small></div><b>{dailyRecords.length}</b></button>
@@ -534,7 +660,7 @@ function ModulePage({module,config,records,onAdd,refresh,notify,embedded=false}:
   async function complete(id:string){try{const result=await api<{nextDate?:string}>('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'complete'})});await refresh();notify(result.nextDate?`Completed. Next reminder scheduled for ${result.nextDate}.`:'Reminder completed.');}catch(e){notify(e instanceof Error?e.message:'Unable to complete reminder.')}}
   return <>
     {!embedded&&<div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add {config.singular}</button>}</div>}
-    <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records remain in the audit history.'}</p></div><button onClick={()=>window.print()}>Print</button></div>
+    <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records remain in the audit history.'}</p></div><div className="button-row"><button className="button" onClick={()=>downloadSectionPdf(module,config,records)}>Download A4 PDF</button><button className="button" onClick={()=>window.print()}>Print</button></div></div>
       {records.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Status</th><th>Entered by</th><th className="actions-cell">Actions</th></tr></thead><tbody>{records.map(r=>{
         const reminderState=module==='reminders'?(r.event_date<today()?'Overdue':r.event_date===today()?'Due today':'Upcoming'):r.status;
         return <tr key={r.id}><td className="nowrap">{r.event_date}</td><td><strong>{r.record_key||r.title}</strong></td><td><span className="record-detail">{module==='animals'?`${r.data.animalType||'Animal'} · ${r.data.sex||'Unknown'} · ${r.data.lifeStage||'Adult'} · ${r.data.breed||'Breed not set'} · Worth: ${money(animalWorth(r))}`:Object.entries(r.data).filter(([key,v])=>v&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,4).map(([k,v])=>`${k.replace(/([A-Z])/g,' $1')}: ${v}`).join(' · ')}</span></td><td><span className={`status-chip ${String(reminderState).toLowerCase().replace(' ','-')}`}>{reminderState}</span></td><td>{r.created_by_name||'Farm user'}</td><td className="actions-cell"><div className="row-actions">{canWrite&&<><button className="row-action edit" onClick={()=>setEditing(r)} aria-label={`Edit ${r.record_key||r.title}`}>Edit</button><button className="row-action danger" onClick={()=>{setDeleteError('');setDeleting(r)}} aria-label={`Delete ${r.record_key||r.title}`}>Delete</button>{module==='reminders'&&<button className="row-action complete" onClick={()=>complete(r.id)}>Done {(r.data.intervalValue||r.data.reminderIntervalValue)?'& next':''}</button>}{['owner','manager'].includes(user?.role||'')&&<button className="row-action" onClick={()=>archive(r.id)}>Archive</button>}</>}{!canWrite&&<span>View only</span>}</div></td></tr>;
@@ -660,7 +786,7 @@ function Users({currentUser,notify}:{currentUser:User;notify:(s:string)=>void}){
   }
   if(currentUser.role!=='owner')return <Empty title="Owner access only" text="Only farm owners can manage user accounts and permissions."/>;
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><a className="button" href="/api/backup">Download backup</a><button className="button primary" onClick={()=>edit()}>+ Add portal user</button></div></div>
+    <div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><button className="button" onClick={()=>downloadUsersPdf(users)}>Download A4 PDF</button><a className="button" href="/api/backup">Download backup</a><button className="button primary" onClick={()=>edit()}>+ Add portal user</button></div></div>
     {show&&<section className="panel inline-form"><h2>{editing?'Edit portal user':'Add portal user'}</h2><form onSubmit={save}>
       <label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></label>
       <label>Phone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} required/></label>
