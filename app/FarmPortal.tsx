@@ -306,7 +306,7 @@ async function downloadLivestockSheet(records:FarmRecord[]){
       String(record.data.breed||''),
       String(record.data.dateOfBirth||''),
       String(record.data.purchaseDate||record.event_date||''),
-      Math.round(Number(record.data.purchasePrice||0)),
+      Math.round(numberValue(record.data.purchasePrice)),
       Math.round(animalWorth(record)),
       record.status,
       String(record.data.location||''),
@@ -857,8 +857,8 @@ function Attachments({recordId}:{recordId:string}){
 
 function Reports({records}:{records:FarmRecord[]}){
   const finance=records.filter(r=>r.module==='finance'||r.module==='dailyexpenses');
-  const income=finance.filter(r=>r.data.type==='Income').reduce((s,r)=>s+Number(r.data.amount||0),0);
-  const expense=finance.filter(r=>r.data.type==='Expense').reduce((s,r)=>s+Number(r.data.amount||0),0);
+  const income=finance.filter(r=>r.data.type==='Income').reduce((s,r)=>s+numberValue(r.data.amount),0);
+  const expense=finance.filter(r=>r.data.type==='Expense').reduce((s,r)=>s+numberValue(r.data.amount),0);
   const animals=records.filter(r=>r.module==='animals');
   const sold=animals.filter(r=>r.status==='Sold').length;
   const presentAnimals=animals.filter(isPresentAnimal);
