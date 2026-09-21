@@ -258,6 +258,28 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   </>;
 }
 
+function AnimalsPage({records,summaryRecords,config,onAdd,refresh,notify}:{records:FarmRecord[];summaryRecords:FarmRecord[];config:ModuleConfig;onAdd:()=>void;refresh:()=>Promise<void>;notify:(x:string)=>void}){
+  const [selected,setSelected]=useState<'all'|LivestockGroupKey>('all');
+  const user=useContext(UserContext);
+  const canWrite=mayWrite(user,'animals');
+  const present=summaryRecords.filter(isPresentAnimal);
+  const totalWorth=present.reduce((sum,record)=>sum+animalWorth(record),0);
+  const youngCount=present.filter(isYoungAnimal).length;
+  const missingWorth=present.filter(record=>String(record.data.currentWorth??'').trim()==='').length;
+  const goats=present.filter(record=>['goats-female','goats-male'].includes(String(livestockGroupOf(record))));
+  const visible=selected==='all'?records:records.filter(record=>livestockGroupOf(record)===selected);
+  const selectedLabel=selected==='all'?'All animal records':livestockGroups.find(group=>group.key===selected)?.label||'Animals';
+  return <>
+    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="animals" size={14}/> Livestock register</span><h1>Animals</h1><p>Cows, bulls, female goats, male goats and hens are separated below. Present worth and young stock totals update from the editable animal profiles.</p></div><div className="button-row"><button className="button" onClick={()=>downloadLivestockSheet(summaryRecords)}>Download worth sheet</button>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add animal</button>}</div></div>
+    <div className="metric-grid livestock-metrics"><article className="metric"><span>Present livestock</span><strong>{present.length}</strong><small>All animals currently on the farm</small></article><article className="metric"><span>Present livestock worth</span><strong>{money(totalWorth)}</strong><small>{missingWorth?`${missingWorth} record${missingWorth===1?'':'s'} still use purchase price until current worth is entered`:'Every present animal has a current worth'}</small></article><article className="metric"><span>Total goats</span><strong>{goats.length}</strong><small>{goats.filter(record=>livestockGroupOf(record)==='goats-female').length} female · {goats.filter(record=>livestockGroupOf(record)==='goats-male').length} male</small></article><article className="metric"><span>Young / babies</span><strong>{youngCount}</strong><small>Calves, kids and chicks marked as young</small></article></div>
+    <section className="panel livestock-overview"><div className="panel-heading"><div><span className="section-kicker">Separate livestock sections</span><h2>Present stock & worth</h2><p>Click a section to show only those animal records. Sold, dead and transferred records stay in history but are excluded from present totals and worth.</p></div>{selected!=='all'&&<button onClick={()=>setSelected('all')}>Show all</button>}</div>
+      <div className="livestock-cards">{livestockGroups.map(group=>{const grouped=present.filter(record=>livestockGroupOf(record)===group.key);const adults=grouped.filter(record=>!isYoungAnimal(record));const young=grouped.filter(isYoungAnimal);const worth=grouped.reduce((sum,record)=>sum+animalWorth(record),0);return <button type="button" className={selected===group.key?'livestock-card active':'livestock-card'} onClick={()=>setSelected(group.key)} key={group.key}><span>{group.label}</span><strong>{grouped.length}</strong><div><small>Adults<b>{adults.length}</b></small><small>{group.youngLabel}<b>{young.length}</b></small></div><em>{money(worth)}</em><i>Present worth</i></button>})}</div>
+    </section>
+    <div className="livestock-selected"><div><span className="section-kicker">Viewing</span><strong>{selectedLabel}</strong></div><span>{visible.length} saved record{visible.length===1?'':'s'}</span></div>
+    <ModulePage key={selected} module="animals" config={config} records={visible} onAdd={onAdd} refresh={refresh} notify={notify} embedded/>
+  </>;
+}
+
 function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];search:string;refresh:()=>Promise<void>;notify:(x:string)=>void}){
   const [tab,setTab]=useState<'finance'|'dailyexpenses'>('finance');
   const [showForm,setShowForm]=useState(false);
