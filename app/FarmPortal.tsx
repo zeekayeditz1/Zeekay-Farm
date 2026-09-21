@@ -33,6 +33,10 @@ function farmDate(value=new Date()){
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 const today = () => farmDate();
+function farmGreeting(){
+  const hour=Number(new Intl.DateTimeFormat('en-US',{timeZone:FARM_TIME_ZONE,hour:'2-digit',hourCycle:'h23'}).format(new Date()));
+  return hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
+}
 const numberValue=(value:unknown)=>{const parsed=Number(value??0);return Number.isFinite(parsed)?parsed:0};
 const money = (value: number) => `Rs ${Math.round(numberValue(value)).toLocaleString('en-PK')}`;
 
@@ -697,7 +701,7 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const upcoming=reminders.slice(0,6);
   const urgent=[...overdue,...dueToday];
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>Good morning</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><div className="button-row"><button className="button" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button>{mayWrite(user,'animals')&&<button className="button primary" onClick={()=>open('animals')}>+ Add animal</button>}</div></div>
+    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>{farmGreeting()}</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><div className="button-row"><button className="button" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button>{mayWrite(user,'animals')&&<button className="button primary" onClick={()=>open('animals')}>+ Add animal</button>}</div></div>
     {urgent.length>0&&<section className="dashboard-alert" role="status"><span><BellRing size={22}/></span><div><strong>{urgent.length} farm task{urgent.length===1?' needs':'s need'} attention</strong><p>{overdue.length?`${overdue.length} overdue. `:''}{dueToday.length?`${dueToday.length} due today.`:''} Open reminders to complete them and automatically schedule the next repeat.</p></div>{mayRead(user,'reminders')&&<button onClick={()=>open('reminders',false)}>Review reminders</button>}</section>}
     <div className="metric-grid">{cards.map(([label,value,note])=><article className="metric" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div>
     <div className="content-grid">
