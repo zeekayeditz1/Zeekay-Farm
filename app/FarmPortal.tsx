@@ -193,7 +193,9 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
 function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];search:string;refresh:()=>Promise<void>;notify:(x:string)=>void}){
   const [tab,setTab]=useState<'finance'|'dailyexpenses'>('finance');
   const [showForm,setShowForm]=useState(false);
+  const user=useContext(UserContext);
   const config=configs[tab];
+  const canWrite=mayWrite(user,tab);
   const filtered=records.filter(record=>record.module===tab&&(!search||`${record.title} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
   const dailyRecords=records.filter(record=>record.module==='dailyexpenses');
   const todayTotal=dailyRecords.filter(record=>record.event_date===today()).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
@@ -201,7 +203,7 @@ function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];searc
   const monthTotal=dailyRecords.filter(record=>record.event_date.startsWith(currentMonth)).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
   function switchTab(next:'finance'|'dailyexpenses'){setTab(next);setShowForm(false)}
   return <>
-    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div><button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button></div>
+    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div>{canWrite&&<button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button>}</div>
     <div className="finance-subtabs" role="tablist" aria-label="Income and expense sections">
       <button className={tab==='finance'?'active':''} onClick={()=>switchTab('finance')} role="tab" aria-selected={tab==='finance'}><span><WalletCards size={18}/></span><div><strong>Income & expense ledger</strong><small>Regular income, purchases and major payments</small></div></button>
       <button className={tab==='dailyexpenses'?'active':''} onClick={()=>switchTab('dailyexpenses')} role="tab" aria-selected={tab==='dailyexpenses'}><span><BadgeDollarSign size={18}/></span><div><strong>Daily miscellaneous expenses</strong><small>Chota mota farm kharcha with date and notes</small></div><b>{dailyRecords.length}</b></button>
