@@ -1,6 +1,6 @@
-# Ali Livestock
+# Ali Dairies
 
-Private, mobile-friendly farm management portal for Ali Livestock in Chak No. 101 D.B, Tehsil Yazman, District Bahawalpur.
+Private, mobile-friendly farm management portal for Ali Dairies in Chak No. 101 D.B, Tehsil Yazman, District Bahawalpur.
 
 Live portal: <https://portal.hwf.zeekayeditz.com>
 
@@ -9,7 +9,7 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 - Dashboard and reminders
 - Animal profiles and permanent lifecycle history
 - Separate cow, bull, female goat, male goat and hen sections with present counts, young-stock counts and editable current worth
-- Downloadable Excel-compatible livestock worth sheet with section totals and full animal details
+- Branded A4 PDF exports across every portal section, including livestock worth sheets with section totals and full animal details
 - Separate dated sales/exits with entry and exit age, weight and price
 - Weight estimation and editable feed calculation
 - Health, medicine, vaccination and breeding records
@@ -20,7 +20,7 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 - Income, expenses and farm reports
 - Owner/worker accounts with section permissions
 - Private photo, receipt and PDF attachments
-- Owner-only JSON backup and audit history
+- Owner-only JSON database backup and audit history (attachment metadata is included; attachment file bytes remain in private Cloudflare KV)
 
 ## Platform
 
@@ -28,7 +28,7 @@ The application is built with Next.js/vinext and runs on Cloudflare Workers. Far
 
 ## Editing and deleting entries
 
-Every farm record section, including both expense tabs, has Edit and Delete actions for users with write access. Edit opens the existing values and saves changes to the same record. Delete requires confirmation, removes the entry from live lists and report totals, and cancels its pending reminders. Audit copies remain in the owner backup. Other independently entered records are preserved.
+Every farm record section, including both expense tabs, has Edit and Delete actions for users with write access. Edit opens the existing values and saves changes to the same record. Delete requires confirmation, removes the entry from live lists and report totals, and cancels its pending reminders. Audit copies remain in the owner database backup. Archived records can be reviewed and restored by owners and managers. Other independently entered records are preserved.
 
 Animal tag corrections update related history. Editing or deleting a sale corrects the linked animal's exit status; newly created sales remember its previous status. Older sales without this information fall back to Active. Reminder schedules can be edited, disabled, or removed without duplicating active reminders. Attachments can be opened or deleted from the edit form; use its upload field to add a replacement. Owners can also edit and delete portal users, with self-deletion and removal of their own owner access blocked.
 
