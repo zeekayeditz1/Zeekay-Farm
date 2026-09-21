@@ -2,6 +2,9 @@ name: Deploy Zeekay Farm to Cloudflare
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
