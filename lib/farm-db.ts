@@ -74,6 +74,8 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_records_active ON records(module, archived, status)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_records_module_key ON records(module, record_key) WHERE record_key IS NOT NULL AND archived = 0`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash, expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_files_record ON files(record_id)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at)`,
 ];
 
@@ -96,6 +98,29 @@ export async function ensureDatabase() {
 }
 
 export const nowIso = () => new Date().toISOString();
+
+const FARM_TIME_ZONE = 'Asia/Karachi';
+
+export function farmDate(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: FARM_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+export function isDateOnly(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
 
 export async function audit(userId: string, action: string, module: string, recordId: string | null, summary: string) {
   await db().prepare(
