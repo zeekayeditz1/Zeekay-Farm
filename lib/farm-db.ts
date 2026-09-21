@@ -95,6 +95,14 @@ export function db(): D1Database {
 export async function ensureDatabase() {
   schemaReady ??= (async () => {
     await db().batch(schemaStatements.map((sql) => db().prepare(sql)));
+    const fieldHistoryMigration = await db().prepare("SELECT value FROM settings WHERE key = 'migration:field-history-v1'").first<{value:string}>();
+    if (!fieldHistoryMigration) {
+      const now = nowIso();
+      await db().batch([
+        db().prepare("UPDATE records SET record_key = NULL, updated_at = ? WHERE module = 'fields' AND record_key IS NOT NULL").bind(now),
+        db().prepare("INSERT INTO settings (key, value, updated_at) VALUES ('migration:field-history-v1', 'applied', ?)").bind(now),
+      ]);
+    }
     await db().prepare('PRAGMA optimize').run();
   })().catch((error) => {
     schemaReady = null;
