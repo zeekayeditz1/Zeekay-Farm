@@ -75,7 +75,14 @@ export async function currentUser(request: Request): Promise<FarmUser | null> {
      WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1`,
   ).bind(tokenHash, nowIso()).first<{ id: string; name: string; phone: string; role: FarmUser['role']; permissions: string }>();
   if (!row) return null;
-  return { ...row, permissions: JSON.parse(row.permissions || '[]') };
+  let permissions: string[] = [];
+  try {
+    const parsed = JSON.parse(row.permissions || '[]');
+    if (Array.isArray(parsed)) permissions = parsed.filter((item): item is string => typeof item === 'string');
+  } catch {
+    permissions = [];
+  }
+  return { ...row, permissions };
 }
 
 export async function requireUser(request: Request) {
@@ -108,6 +115,7 @@ export async function prepareSession(userId: string) {
 export async function createSession(userId: string) {
   const session = await prepareSession(userId);
   await db().batch([
+    db().prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(session.createdAt),
     db().prepare('INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
       .bind(session.id, session.userId, session.tokenHash, session.expiresAt, session.createdAt),
     db().prepare('UPDATE users SET last_login_at = ? WHERE id = ?').bind(session.createdAt, userId),
