@@ -218,7 +218,7 @@ export async function PATCH(request: Request) {
         const nextId = crypto.randomUUID();
         statements.push(db().prepare(
           'INSERT INTO records (id, module, title, status, event_date, linked_id, data, archived, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
-        ).bind(nextId, 'reminders', existing.title, 'upcoming', nextDate, existing.linked_id || existing.id, JSON.stringify({ ...reminderData, previousReminderId: id, lastCompletedDate: completedDate }), user.id, now, now));
+        ).bind(nextId, 'reminders', existing.title, 'upcoming', nextDate, existing.linked_id || existing.id, JSON.stringify({ ...reminderData, nextDate, previousReminderId: id, lastCompletedDate: completedDate }), user.id, now, now));
       }
       await db().batch(statements);
       return jsonResponse({ ok: true, nextDate: nextDate || undefined });
@@ -283,7 +283,7 @@ export async function PATCH(request: Request) {
     }
     if (existing.module !== 'reminders') {
       const reminderKeys = ['reminderEnabled','reminderTitle','reminderDate','reminderIntervalValue','reminderIntervalUnit','nextDate','nextMaintenanceDate','expectedCalvingDate'];
-      const changed = reminderKeys.some(key => String(previousData[key] ?? '') !== String(data[key] ?? ''));
+      const changed = eventDate !== existing.event_date || reminderKeys.some(key => String(previousData[key] ?? '') !== String(data[key] ?? ''));
       if (changed) {
         statements.push(db().prepare("UPDATE records SET archived = 2, updated_at = ? WHERE module = 'reminders' AND linked_id = ? AND archived = 0").bind(now, id));
         const interval = Number(data.reminderIntervalValue || 0);
