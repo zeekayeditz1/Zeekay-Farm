@@ -91,6 +91,13 @@ try {
   await request('/api/upload','DELETE',{id:fileId},401,viewerCookie);
   await request('/api/upload','DELETE',{id:fileId});
   check(!(await request('/api/upload?recordId='+animal)).result.files.length,'Attachment deletion persists');
+  const fileRecord=await add('maintenance',{assetName:'QA attachment cleanup',recordDate:'2026-09-21',jobType:'Repair',workDone:'Delete record attachment cleanup',totalCost:'1'});
+  const recordForm=new FormData();recordForm.append('recordId',fileRecord);recordForm.append('file',new Blob(['%PDF-1.4\ncleanup-test'],{type:'application/pdf'}),'cleanup.pdf');
+  const recordUpload=await fetch(origin+'/api/upload',{method:'POST',headers:{Cookie:cookie,Origin:origin},body:recordForm});assert.equal(recordUpload.status,201);
+  const recordFileId=(await recordUpload.json()).id;
+  check(Boolean(db.prepare('SELECT 1 FROM files WHERE id = ?').get(recordFileId)),'Record attachment metadata created');
+  await request('/api/records','DELETE',{id:fileRecord});
+  check(!db.prepare('SELECT 1 FROM files WHERE id = ?').get(recordFileId),'Deleting a record removes its attachment metadata');
   await request('/api/records','PATCH',{id:other,action:'archive'});
   await request('/api/records','PATCH',{id:other,action:'restore'});
   check(Boolean(await get(other)),'Existing archive and restore behavior still works');
