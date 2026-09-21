@@ -14,8 +14,17 @@ function permissionModule(module: string) {
   return module === 'dailyexpenses' ? 'finance' : module;
 }
 
+function parseData(value: string) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 function serialize(row: RecordRow) {
-  return { ...row, archived: Boolean(row.archived), data: JSON.parse(row.data || '{}') };
+  return { ...row, archived: Boolean(row.archived), data: parseData(row.data) };
 }
 
 function addInterval(date: string, amount: number, unit: string) {
@@ -177,7 +186,7 @@ export async function PATCH(request: Request) {
     if (existing.archived && action !== 'restore') return errorResponse('Restore this archived record before editing it.',409);
     if (action === 'complete') {
       if (existing.module !== 'reminders') return errorResponse('Only reminders can be completed this way.');
-      const reminderData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
+      const reminderData = parseData(existing.data);
       const intervalValue = Number(reminderData.intervalValue || reminderData.reminderIntervalValue || 0);
       const intervalUnit = cleanText(reminderData.intervalUnit || reminderData.reminderIntervalUnit, 10) || 'months';
       const completedDate = farmDate();
@@ -209,7 +218,7 @@ export async function PATCH(request: Request) {
           .bind(crypto.randomUUID(), user.id, action, existing.module, id, `${action === 'archive' ? 'Archived' : 'Restored'} ${existing.title}`, now),
       ];
       if (existing.module === 'sales' && existing.record_key) {
-        const previousData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
+        const previousData = parseData(existing.data);
         if (action === 'archive') {
           statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(previousData.previousAnimalStatus, 30)));
         } else {
@@ -221,7 +230,7 @@ export async function PATCH(request: Request) {
       return jsonResponse({ ok: true });
     }
     if (action && action !== 'update') return errorResponse('Unknown record action.');
-    const previousData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
+    const previousData = parseData(existing.data);
     const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...body.data } : previousData;
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
@@ -309,7 +318,7 @@ export async function DELETE(request: Request) {
       db().prepare('DELETE FROM files WHERE record_id = ?').bind(id),
       db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)').bind(crypto.randomUUID(), user.id, 'delete', existing.module, id, `Deleted ${existing.title}`, now),
     ];
-    if (existing.module === 'sales' && existing.record_key) statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(JSON.parse(existing.data || '{}').previousAnimalStatus,30)));
+    if (existing.module === 'sales' && existing.record_key) statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(parseData(existing.data).previousAnimalStatus,30)));
     await db().batch(statements);
     if (env.FILES) await Promise.allSettled(attachments.results.map((file) => env.FILES.delete(file.object_key)));
     return jsonResponse({ ok: true });
