@@ -16,7 +16,13 @@ type Field = { key: string; label: string; type?: 'text'|'number'|'date'|'select
 type ModuleConfig = { label: string; singular: string; description: string; icon: string; fields: Field[]; keyField?: string; titleField: string; statusOptions?: string[] };
 
 const animalTypes = ['Cow','Bull','Buffalo','Sheep','Goat','Hen','Chicken','Other'];
-const today = () => new Date().toISOString().slice(0, 10);
+const FARM_TIME_ZONE = 'Asia/Karachi';
+function farmDate(value=new Date()){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:FARM_TIME_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(value);
+  const get=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value||'';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+const today = () => farmDate();
 const money = (value: number) => `Rs ${Math.round(value).toLocaleString('en-PK')}`;
 
 type LivestockGroupKey = 'cows'|'bulls'|'goats-female'|'goats-male'|'hens';
@@ -113,16 +119,10 @@ async function createAliDairiesPdf(options:{
   let page:Array<string>=[];
   let y=0;
   const generated=new Date();
-  const generatedLabel=generated.toLocaleString('en-PK',{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const stamp=[
-    generated.getFullYear(),
-    String(generated.getMonth()+1).padStart(2,'0'),
-    String(generated.getDate()).padStart(2,'0'),
-    '-',
-    String(generated.getHours()).padStart(2,'0'),
-    String(generated.getMinutes()).padStart(2,'0'),
-    String(generated.getSeconds()).padStart(2,'0'),
-  ].join('');
+  const generatedLabel=generated.toLocaleString('en-PK',{timeZone:FARM_TIME_ZONE,year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const stampParts=new Intl.DateTimeFormat('en-US',{timeZone:FARM_TIME_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(generated);
+  const stampPart=(type:Intl.DateTimeFormatPartTypes)=>stampParts.find(part=>part.type===type)?.value||'00';
+  const stamp=`${stampPart('year')}${stampPart('month')}${stampPart('day')}-${stampPart('hour')}${stampPart('minute')}${stampPart('second')}`;
 
   const text=(x:number,yy:number,value:unknown,size=8,bold=false,fill='0.10 0.13 0.11')=>{
     page.push('BT',`/${bold?'F2':'F1'} ${size} Tf`,`${fill} rg`,`1 0 0 1 ${x.toFixed(2)} ${yy.toFixed(2)} Tm`,`(${pdfSafe(value)}) Tj`,'ET');
@@ -565,6 +565,21 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
   return data as T;
 }
 
+async function fetchAllRecordPages(params:Record<string,string>={}){
+  const all:FarmRecord[]=[];
+  let offset=0;
+  for(let page=0;page<200;page+=1){
+    const query=new URLSearchParams({...params,limit:'500',offset:String(offset)});
+    const data=await api<{records:FarmRecord[];hasMore?:boolean;nextOffset?:number|null}>(`/api/records?${query.toString()}`);
+    all.push(...data.records);
+    if(!data.hasMore)return all;
+    const next=Number(data.nextOffset);
+    if(!Number.isFinite(next)||next<=offset)throw new Error('Record pagination could not continue safely.');
+    offset=next;
+  }
+  throw new Error('Too many record pages to load safely.');
+}
+
 function AuthScreen({ setupRequired, onDone }: { setupRequired: boolean; onDone: () => void }) {
   const [name,setName] = useState('Hassaan Ali'); const [phone,setPhone] = useState(''); const [password,setPassword] = useState(''); const [error,setError] = useState(''); const [busy,setBusy] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(''); try { await api('/api/auth',{method:'POST',body:JSON.stringify({action:setupRequired?'setup':'login',name,phone,password})}); onDone(); } catch(e) { setError(e instanceof Error?e.message:'Unable to sign in.'); } finally { setBusy(false); } }
@@ -575,7 +590,7 @@ export default function FarmPortal() {
   const [auth,setAuth] = useState<{loading:boolean;setupRequired:boolean;user:User|null}>({loading:true,setupRequired:false,user:null});
   const [section,setSection] = useState('dashboard'); const [records,setRecords] = useState<FarmRecord[]>([]); const [search,setSearch] = useState(''); const [showForm,setShowForm] = useState(false); const [message,setMessage] = useState(''); const [menuOpen,setMenuOpen] = useState(false);
   const loadAuth = useCallback(async()=>{ try{const data=await api<{setupRequired:boolean;user:User|null}>('/api/auth'); setAuth({loading:false,...data});}catch{setAuth({loading:false,setupRequired:false,user:null});}},[]);
-  const loadRecords = useCallback(async()=>{ if(!auth.user)return; try{const data=await api<{records:FarmRecord[]}>('/api/records');setRecords(data.records);}catch(e){setMessage(e instanceof Error?e.message:'Unable to load records.');}},[auth.user]);
+  const loadRecords = useCallback(async()=>{ if(!auth.user)return; try{setRecords(await fetchAllRecordPages());}catch(e){setMessage(e instanceof Error?e.message:'Unable to load records.');}},[auth.user]);
   // These effects load external server data; their state updates happen after the request.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(()=>{loadAuth();},[loadAuth]); useEffect(()=>{loadRecords();},[loadRecords]);
@@ -620,7 +635,7 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const reminders=records.filter(r=>r.module==='reminders').sort((a,b)=>a.event_date.localeCompare(b.event_date));
   const overdue=reminders.filter(r=>r.event_date<today());
   const dueToday=reminders.filter(r=>r.event_date===today());
-  const thirtyDays=new Date();thirtyDays.setDate(thirtyDays.getDate()+30);const soonDate=thirtyDays.toISOString().slice(0,10);
+  const soonDate=addReminderInterval(today(),30,'days');
   const dueSoon=reminders.filter(r=>r.event_date>today()&&r.event_date<=soonDate);
   const finances=records.filter(r=>r.module==='finance'||r.module==='dailyexpenses');
   const income=finances.filter(r=>r.data.type==='Income').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
@@ -702,19 +717,37 @@ function ModulePage({module,config,records,onAdd,refresh,notify,embedded=false}:
   const [deleting,setDeleting]=useState<FarmRecord|null>(null);
   const [busy,setBusy]=useState(false);
   const [deleteError,setDeleteError]=useState('');
+  const [showArchived,setShowArchived]=useState(false);
+  const [archivedRecords,setArchivedRecords]=useState<FarmRecord[]>([]);
+  const [archivedBusy,setArchivedBusy]=useState(false);
   const user=useContext(UserContext);
   const canWrite=mayWrite(user,module);
+  const canArchive=Boolean(canWrite&&['owner','manager'].includes(user?.role||''));
+  async function loadArchived(){
+    if(!canArchive)return;
+    setArchivedBusy(true);
+    try{setArchivedRecords(await fetchAllRecordPages({module,archived:'1'}));}
+    catch(e){notify(e instanceof Error?e.message:'Unable to load archived records.');}
+    finally{setArchivedBusy(false);}
+  }
+  async function toggleArchived(){
+    if(showArchived){setShowArchived(false);return}
+    setShowArchived(true);
+    await loadArchived();
+  }
   async function remove(){if(!deleting||busy)return;setBusy(true);setDeleteError('');try{await api('/api/records',{method:'DELETE',body:JSON.stringify({id:deleting.id})});setDeleting(null);await refresh();notify('Record deleted.');}catch(e){setDeleteError(e instanceof Error?e.message:'Unable to delete.')}finally{setBusy(false)}}
-  async function archive(id:string){if(!confirm('Archive this record? Its dated history will be preserved.'))return;try{await api('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'archive'})});await refresh();notify('Record archived.');}catch(e){notify(e instanceof Error?e.message:'Unable to archive.')}}
+  async function archive(id:string){if(!confirm('Archive this record? You can restore it later from Archived records.'))return;try{await api('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'archive'})});await refresh();if(showArchived)await loadArchived();notify('Record archived.');}catch(e){notify(e instanceof Error?e.message:'Unable to archive.')}}
+  async function restore(id:string){try{await api('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'restore'})});await refresh();await loadArchived();notify('Record restored.');}catch(e){notify(e instanceof Error?e.message:'Unable to restore.')}}
   async function complete(id:string){try{const result=await api<{nextDate?:string}>('/api/records',{method:'PATCH',body:JSON.stringify({id,action:'complete'})});await refresh();notify(result.nextDate?`Completed. Next reminder scheduled for ${result.nextDate}.`:'Reminder completed.');}catch(e){notify(e instanceof Error?e.message:'Unable to complete reminder.')}}
   return <>
     {!embedded&&<div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name={module} size={14}/> Farm records</span><h1>{config.label}</h1><p>{config.description}</p></div>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add {config.singular}</button>}</div>}
-    <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records remain in the audit history.'}</p></div><div className="button-row"><button className="button" onClick={()=>downloadSectionPdf(module,config,records)}>Download A4 PDF</button><button className="button" onClick={()=>window.print()}>Print</button></div></div>
+    <section className="panel"><div className="panel-heading"><div><h2>{records.length} {records.length===1?'record':'records'}</h2><p>{module==='reminders'?'Complete a reminder to automatically create its next recurring date.':'Newest activity appears first. Archived records can be reviewed and restored.'}</p></div><div className="button-row">{!embedded&&<button className="button" onClick={()=>downloadSectionPdf(module,config,records)}>Download A4 PDF</button>}{canArchive&&<button className="button" disabled={archivedBusy} onClick={toggleArchived}>{archivedBusy?'Loading…':showArchived?'Hide archived':'Archived records'}</button>}<button className="button" onClick={()=>window.print()}>Print</button></div></div>
       {records.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Status</th><th>Entered by</th><th className="actions-cell">Actions</th></tr></thead><tbody>{records.map(r=>{
         const reminderState=module==='reminders'?(r.event_date<today()?'Overdue':r.event_date===today()?'Due today':'Upcoming'):r.status;
         return <tr key={r.id}><td className="nowrap">{r.event_date}</td><td><strong>{r.record_key||r.title}</strong></td><td><span className="record-detail">{module==='animals'?`${r.data.animalType||'Animal'} · ${r.data.sex||'Unknown'} · ${r.data.lifeStage||'Adult'} · ${r.data.breed||'Breed not set'} · Worth: ${money(animalWorth(r))}`:Object.entries(r.data).filter(([key,v])=>v&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,4).map(([k,v])=>`${k.replace(/([A-Z])/g,' $1')}: ${v}`).join(' · ')}</span></td><td><span className={`status-chip ${String(reminderState).toLowerCase().replace(' ','-')}`}>{reminderState}</span></td><td>{r.created_by_name||'Farm user'}</td><td className="actions-cell"><div className="row-actions">{canWrite&&<><button className="row-action edit" onClick={()=>setEditing(r)} aria-label={`Edit ${r.record_key||r.title}`}>Edit</button><button className="row-action danger" onClick={()=>{setDeleteError('');setDeleting(r)}} aria-label={`Delete ${r.record_key||r.title}`}>Delete</button>{module==='reminders'&&<button className="row-action complete" onClick={()=>complete(r.id)}>Done {(r.data.intervalValue||r.data.reminderIntervalValue)?'& next':''}</button>}{['owner','manager'].includes(user?.role||'')&&<button className="row-action" onClick={()=>archive(r.id)}>Archive</button>}</>}{!canWrite&&<span>View only</span>}</div></td></tr>;
       })}</tbody></table></div>:<Empty title={`No ${config.label.toLowerCase()} yet`} text={`Add the first ${config.singular} to start this farm history.`}/>}
     </section>
+    {showArchived&&<section className="panel archived-panel"><div className="panel-heading"><div><span className="section-kicker">Archive</span><h2>Archived {config.label.toLowerCase()}</h2><p>Archived entries do not appear in live totals or reports. Restore an entry to make it active again.</p></div><span className="status-chip">{archivedRecords.length} archived</span></div>{archivedRecords.length?<div className="table-wrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Status</th><th>Entered by</th><th className="actions-cell">Actions</th></tr></thead><tbody>{archivedRecords.map(record=><tr key={record.id}><td className="nowrap">{record.event_date}</td><td><strong>{record.record_key||record.title}</strong></td><td><span className="status-chip">{record.status}</span></td><td>{record.created_by_name||'Farm user'}</td><td className="actions-cell"><div className="row-actions"><button className="row-action edit" onClick={()=>restore(record.id)}>Restore</button></div></td></tr>)}</tbody></table></div>:<Empty title="No archived records" text="Archived entries for this section will appear here." compact/>}</section>}
     {editing&&<RecordForm key={editing.id} module={module} config={config} record={editing} onClose={()=>setEditing(null)} onSaved={async()=>{setEditing(null);await refresh();notify('Changes saved.')}}/>}
     {deleting&&<div className="modal-backdrop"><section className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><h2 id="delete-title">Delete {config.singular}?</h2><p id="delete-description"><strong>{deleting.record_key||deleting.title}</strong> · {deleting.event_date}<br/>This removes the entry from the portal and reports, along with its pending reminders. Other farm records stay intact. A private audit copy is kept.</p>{deleteError&&<p className="form-error" role="alert">{deleteError}</p>}<div className="button-row"><button autoFocus className="button" disabled={busy} onClick={()=>setDeleting(null)}>Cancel</button><button className="button danger-button" disabled={busy} onClick={remove}>{busy?'Deleting…':'Delete record'}</button></div></section></div>}
   </>;
