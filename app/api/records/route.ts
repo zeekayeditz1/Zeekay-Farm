@@ -35,11 +35,16 @@ function parseData(value: string) {
 function sanitizeIncomingData(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {} as Record<string, unknown>;
   const result: Record<string, unknown> = {};
+  let remainingText = 50_000;
   for (const [rawKey, rawValue] of Object.entries(value).slice(0, 150)) {
     const key = rawKey.trim().slice(0, 80);
     if (!key) continue;
-    if (typeof rawValue === 'string') result[key] = rawValue.slice(0, 5000);
-    else if (typeof rawValue === 'number' && Number.isFinite(rawValue)) result[key] = rawValue;
+    if (typeof rawValue === 'string') {
+      const text = rawValue.slice(0, Math.min(5000, remainingText));
+      result[key] = text;
+      remainingText -= text.length;
+      if (remainingText <= 0) break;
+    } else if (typeof rawValue === 'number' && Number.isFinite(rawValue)) result[key] = rawValue;
     else if (typeof rawValue === 'boolean') result[key] = rawValue ? 'yes' : 'no';
     else if (rawValue === null) result[key] = '';
   }
