@@ -189,6 +189,9 @@ export async function PATCH(request: Request) {
     }
     if (action === 'archive' || action === 'restore') {
       if (!['owner','manager'].includes(user.role)) return errorResponse('Only an owner or manager can archive records.', 403);
+      if (action === 'restore' && existing.module === 'reminders' && existing.status === 'completed') {
+        return errorResponse('Completed reminders stay in history and cannot be restored. Create a new reminder instead.', 409);
+      }
       const now = nowIso();
       const statements: D1PreparedStatement[] = [
         db().prepare('UPDATE records SET archived = ?, updated_at = ? WHERE id = ?').bind(action === 'archive' ? 1 : 0, now, id),
