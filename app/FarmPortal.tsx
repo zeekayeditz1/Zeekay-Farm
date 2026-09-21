@@ -349,6 +349,8 @@ function RecordForm({module,config,record,onClose,onSaved}:{module:string;config
   function changeField(key:string,value:string){
     setForm(previous=>{
       const next={...previous,[key]:value};
+      if(module==='animals'&&key==='animalType'&&value==='Bull')next.sex='Male';
+      if(module==='animals'&&key==='animalType'&&value==='Hen')next.sex='Female';
       const days=({Cow:283,Buffalo:310,Goat:150,Sheep:147} as Record<string,number>)[next.animalType];
       if(module==='breeding'&&['matingDate','animalType'].includes(key)&&next.matingDate&&days&&!next.expectedCalvingDate){
         const date=new Date(next.matingDate+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+days);next.expectedCalvingDate=date.toISOString().slice(0,10);
