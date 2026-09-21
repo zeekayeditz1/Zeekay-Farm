@@ -8,6 +8,8 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 
 - Dashboard and reminders
 - Animal profiles and permanent lifecycle history
+- Separate cow, bull, female goat, male goat and hen sections with present counts, young-stock counts and editable current worth
+- Downloadable Excel-compatible livestock worth sheet with section totals and full animal details
 - Separate dated sales/exits with entry and exit age, weight and price
 - Weight estimation and editable feed calculation
 - Health, medicine, vaccination and breeding records
