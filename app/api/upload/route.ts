@@ -4,6 +4,17 @@ import { db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin
 
 const allowedTypes = new Set(['image/jpeg','image/png','image/webp','application/pdf']);
 
+async function hasValidSignature(file: File) {
+  const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if (file.type === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (file.type === 'image/png') return bytes.length >= 8 && [0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a].every((value,index)=>bytes[index]===value);
+  if (file.type === 'image/webp') return bytes.length >= 12
+    && String.fromCharCode(...bytes.slice(0,4)) === 'RIFF'
+    && String.fromCharCode(...bytes.slice(8,12)) === 'WEBP';
+  if (file.type === 'application/pdf') return bytes.length >= 5 && String.fromCharCode(...bytes.slice(0,5)) === '%PDF-';
+  return false;
+}
+
 export async function POST(request: Request) {
   try {
     validateOrigin(request);
@@ -15,7 +26,9 @@ export async function POST(request: Request) {
     await requireRecordAccess(request, recordId, true);
     if (!(file instanceof File)) return errorResponse('Choose a photo, bill, receipt or PDF.');
     if (!allowedTypes.has(file.type)) return errorResponse('Only JPG, PNG, WebP and PDF files are accepted.');
+    if (file.size <= 0) return errorResponse('The attachment is empty.');
     if (file.size > 8 * 1024 * 1024) return errorResponse('The file must be smaller than 8 MB.');
+    if (!await hasValidSignature(file)) return errorResponse('The file content does not match its JPG, PNG, WebP or PDF type.');
     if (!env.FILES) return errorResponse('File storage is unavailable.', 503);
     const id = crypto.randomUUID();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'attachment';
