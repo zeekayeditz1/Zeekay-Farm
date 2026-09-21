@@ -69,6 +69,12 @@ const schemaStatements = [
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS login_attempts (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL DEFAULT 0,
+    window_started_at TEXT NOT NULL,
+    blocked_until TEXT
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_records_module_date ON records(module, event_date)`,
   `CREATE INDEX IF NOT EXISTS idx_records_linked_id ON records(linked_id)`,
   `CREATE INDEX IF NOT EXISTS idx_records_active ON records(module, archived, status)`,
