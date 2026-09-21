@@ -145,7 +145,8 @@ export async function POST(request: Request) {
     if (!allowedModules.has(module)) return errorResponse('Unknown farm section.');
     if (!canAccess(user, permissionModule(module), true)) return errorResponse('You cannot add records in this section.', 403);
     const title = cleanText(body.title, 150);
-    const recordKey = cleanText(body.recordKey, 80) || null;
+    const requestedRecordKey = cleanText(body.recordKey, 80) || null;
+    const recordKey = keyRequiredModules.has(module) ? requestedRecordKey : null;
     const status = cleanText(body.status, 30) || 'active';
     const eventDate = cleanText(body.eventDate, 20) || farmDate();
     const linkedId = cleanText(body.linkedId, 80) || null;
@@ -251,7 +252,9 @@ export async function PATCH(request: Request) {
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
     const eventDate = cleanText(body.eventDate, 20) || existing.event_date;
-    const recordKey = Object.hasOwn(body, 'recordKey') ? cleanText(body.recordKey, 80) || null : existing.record_key;
+    const recordKey = keyRequiredModules.has(existing.module)
+      ? (Object.hasOwn(body, 'recordKey') ? cleanText(body.recordKey, 80) || null : existing.record_key)
+      : null;
     if (keyRequiredModules.has(existing.module) && !recordKey) return errorResponse('A tag or record number is required.');
     if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     const now = nowIso();
