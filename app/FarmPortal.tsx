@@ -44,26 +44,211 @@ function animalWorth(record:FarmRecord){
   const value=Number(current!==''?current:record.data.purchasePrice||0);
   return Number.isFinite(value)?value:0;
 }
+
+type PdfColumn = { label:string; width:number };
+
+function pdfSafe(value:unknown){
+  return String(value??'')
+    .replace(/[–—]/g,'-')
+    .replace(/[^\x20-\x7E]/g,' ')
+    .replace(/\\/g,'\\\\')
+    .replace(/\(/g,'\\(')
+    .replace(/\)/g,'\\)');
+}
+
+function pdfTruncate(value:unknown,width:number,fontSize:number){
+  const raw=String(value??'').replace(/\s+/g,' ').trim();
+  const max=Math.max(4,Math.floor(width/(fontSize*.52)));
+  if(raw.length<=max)return raw;
+  return raw.slice(0,Math.max(1,max-3))+'...';
+}
+
+function createAliDairiesPdf(options:{
+  title:string;
+  subtitle:string;
+  fileBase:string;
+  summaryTitle:string;
+  summaryColumns:PdfColumn[];
+  summaryRows:Array<Array<string|number>>;
+  detailTitle:string;
+  detailColumns:PdfColumn[];
+  detailRows:Array<Array<string|number>>;
+}){
+  const pageWidth=841.89;
+  const pageHeight=595.28;
+  const margin=30;
+  const pages:Array<Array<string>>=[];
+  let page:Array<string>=[];
+  let y=0;
+  const generated=new Date();
+  const generatedLabel=generated.toLocaleString('en-PK',{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const stamp=[
+    generated.getFullYear(),
+    String(generated.getMonth()+1).padStart(2,'0'),
+    String(generated.getDate()).padStart(2,'0'),
+    '-',
+    String(generated.getHours()).padStart(2,'0'),
+    String(generated.getMinutes()).padStart(2,'0'),
+    String(generated.getSeconds()).padStart(2,'0'),
+  ].join('');
+
+  const text=(x:number,yy:number,value:unknown,size=8,bold=false,fill='0.10 0.13 0.11')=>{
+    page.push('BT',`/${bold?'F2':'F1'} ${size} Tf`,`${fill} rg`,`1 0 0 1 ${x.toFixed(2)} ${yy.toFixed(2)} Tm`,`(${pdfSafe(value)}) Tj`,'ET');
+  };
+  const rect=(x:number,yy:number,w:number,h:number,fill:string,stroke?:string)=>{
+    page.push(`${fill} rg`);
+    if(stroke){page.push(`${stroke} RG`,`${x.toFixed(2)} ${yy.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re B`)}
+    else page.push(`${x.toFixed(2)} ${yy.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`);
+  };
+  const line=(x1:number,y1:number,x2:number,y2:number,stroke='0.84 0.87 0.83')=>page.push(`${stroke} RG`,'0.5 w',`${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
+
+  const newPage=()=>{
+    page=[];
+    pages.push(page);
+    rect(0,pageHeight-76,pageWidth,76,'0.07 0.23 0.15');
+    rect(0,pageHeight-80,pageWidth,4,'0.91 0.68 0.20');
+    rect(30,pageHeight-62,38,38,'0.91 0.68 0.20');
+    text(39,pageHeight-49,'AD',13,true,'0.07 0.23 0.15');
+    text(82,pageHeight-36,'ALI DAIRIES',16,true,'1 1 1');
+    text(82,pageHeight-52,options.title,11,true,'1 1 1');
+    text(82,pageHeight-66,options.subtitle,7.5,false,'0.88 0.94 0.89');
+    text(632,pageHeight-38,'Generated / downloaded',7,false,'0.88 0.94 0.89');
+    text(632,pageHeight-53,generatedLabel,8.5,true,'1 1 1');
+    y=pageHeight-105;
+  };
+
+  const drawTable=(columns:PdfColumn[],rows:Array<Array<string|number>>,fontSize=6.5,rowHeight=18)=>{
+    const totalWidth=columns.reduce((sum,col)=>sum+col.width,0);
+    const drawHeader=()=>{
+      let x=margin;
+      rect(margin,y-rowHeight,totalWidth,rowHeight,'0.95 0.88 0.68','0.80 0.72 0.51');
+      columns.forEach(col=>{
+        text(x+4,y-rowHeight+6,pdfTruncate(col.label,col.width-8,fontSize),fontSize,true,'0.20 0.18 0.10');
+        x+=col.width;
+      });
+      y-=rowHeight;
+    };
+    drawHeader();
+    rows.forEach((row,rowIndex)=>{
+      if(y-rowHeight<44){
+        newPage();
+        drawHeader();
+      }
+      let x=margin;
+      if(rowIndex%2===0)rect(margin,y-rowHeight,totalWidth,rowHeight,'0.98 0.99 0.97');
+      columns.forEach((col,colIndex)=>{
+        text(x+4,y-rowHeight+6,pdfTruncate(row[colIndex]??'',col.width-8,fontSize),fontSize,false,'0.12 0.15 0.13');
+        line(x,y-rowHeight,x,y,'0.88 0.90 0.87');
+        x+=col.width;
+      });
+      line(margin,y-rowHeight,margin+totalWidth,y-rowHeight,'0.88 0.90 0.87');
+      line(margin+totalWidth,y-rowHeight,margin+totalWidth,y,'0.88 0.90 0.87');
+      y-=rowHeight;
+    });
+    y-=12;
+  };
+
+  newPage();
+  text(margin,y,options.summaryTitle,11,true,'0.07 0.23 0.15');
+  y-=13;
+  drawTable(options.summaryColumns,options.summaryRows,7.2,21);
+  if(y<85)newPage();
+  text(margin,y,options.detailTitle,11,true,'0.07 0.23 0.15');
+  y-=13;
+  drawTable(options.detailColumns,options.detailRows,5.8,17);
+
+  pages.forEach((commands,index)=>{
+    page=commands;
+    line(margin,30,pageWidth-margin,30,'0.78 0.82 0.78');
+    text(margin,17,'Ali Dairies | Chak No. 101 D.B, Yazman, Bahawalpur',6.7,false,'0.35 0.40 0.36');
+    text(pageWidth-105,17,`Page ${index+1} of ${pages.length}`,6.7,true,'0.35 0.40 0.36');
+  });
+
+  const objects:Array<string>=[];
+  objects[1]='<< /Type /Catalog /Pages 2 0 R >>';
+  objects[3]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  objects[4]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>';
+  const pageRefs:string[]=[];
+  const encoder=new TextEncoder();
+  pages.forEach((commands,index)=>{
+    const pageObj=5+index*2;
+    const contentObj=pageObj+1;
+    const stream=commands.join('\n');
+    pageRefs.push(`${pageObj} 0 R`);
+    objects[pageObj]=`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObj} 0 R >>`;
+    objects[contentObj]=`<< /Length ${encoder.encode(stream).length} >>\nstream\n${stream}\nendstream`;
+  });
+  objects[2]=`<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pages.length} >>`;
+
+  let pdf='%PDF-1.4\n% Ali Dairies generated report\n';
+  const offsets:number[]=[0];
+  for(let i=1;i<objects.length;i++){
+    offsets[i]=encoder.encode(pdf).length;
+    pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref=encoder.encode(pdf).length;
+  pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for(let i=1;i<objects.length;i++)pdf+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+  pdf+=`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+
+  const href=URL.createObjectURL(new Blob([encoder.encode(pdf)],{type:'application/pdf'}));
+  const a=document.createElement('a');
+  a.href=href;
+  a.download=`${options.fileBase}-${stamp}.pdf`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(href),1000);
+}
+
 function downloadLivestockSheet(records:FarmRecord[]){
   const animals=records.filter(record=>record.module==='animals');
   const present=animals.filter(isPresentAnimal);
-  const summary=livestockGroups.map(group=>{
+  const summaryRows=livestockGroups.map(group=>{
     const groupRecords=present.filter(record=>livestockGroupOf(record)===group.key);
-    return [group.label,groupRecords.filter(record=>!isYoungAnimal(record)).length,groupRecords.filter(isYoungAnimal).length,groupRecords.length,groupRecords.reduce((sum,record)=>sum+animalWorth(record),0)];
+    return [
+      group.label,
+      groupRecords.filter(record=>!isYoungAnimal(record)).length,
+      groupRecords.filter(isYoungAnimal).length,
+      groupRecords.length,
+      Math.round(groupRecords.reduce((sum,record)=>sum+animalWorth(record),0)),
+    ];
   });
-  const rows:Array<Array<string|number>>=[
-    ['ALI DAIRIES LIVESTOCK WORTH SHEET'],
-    ['Generated',today()],
-    [],
-    ['SECTION SUMMARY'],
-    ['Section','Adults','Young / babies','Present total','Current worth (Rs)'],
-    ...summary,
-    ['Grand total',present.filter(record=>!isYoungAnimal(record)).length,present.filter(isYoungAnimal).length,present.length,present.reduce((sum,record)=>sum+animalWorth(record),0)],
-    [],
-    ['ANIMAL DETAILS'],
-    ['Section','Tag','Animal type','Sex','Age class','Breed','Date of birth','Purchase / entry date','Purchase price (Rs)','Current worth (Rs)','Worth basis','Status','Mother tag','Location','Notes'],
-    ...animals.map(record=>[
-      livestockGroups.find(group=>group.key===livestockGroupOf(record))?.label||'Other livestock',
+  summaryRows.push([
+    'GRAND TOTAL',
+    present.filter(record=>!isYoungAnimal(record)).length,
+    present.filter(isYoungAnimal).length,
+    present.length,
+    Math.round(present.reduce((sum,record)=>sum+animalWorth(record),0)),
+  ]);
+  createAliDairiesPdf({
+    title:'Livestock Worth Sheet',
+    subtitle:'Present stock, young animals and current farm valuation',
+    fileBase:'ali-dairies-livestock-worth',
+    summaryTitle:'Section summary',
+    summaryColumns:[
+      {label:'Section',width:185},
+      {label:'Adults',width:85},
+      {label:'Young / babies',width:105},
+      {label:'Present total',width:105},
+      {label:'Current worth (Rs)',width:165},
+    ],
+    summaryRows,
+    detailTitle:'Animal details',
+    detailColumns:[
+      {label:'Section',width:72},
+      {label:'Tag',width:58},
+      {label:'Type',width:52},
+      {label:'Sex',width:42},
+      {label:'Age class',width:62},
+      {label:'Breed',width:70},
+      {label:'DOB',width:62},
+      {label:'Entry date',width:68},
+      {label:'Purchase Rs',width:68},
+      {label:'Current worth Rs',width:76},
+      {label:'Status',width:56},
+      {label:'Location',width:72},
+    ],
+    detailRows:animals.map(record=>[
+      livestockGroups.find(group=>group.key===livestockGroupOf(record))?.label||'Other',
       record.record_key||record.title,
       String(record.data.animalType||''),
       String(record.data.sex||''),
@@ -71,19 +256,52 @@ function downloadLivestockSheet(records:FarmRecord[]){
       String(record.data.breed||''),
       String(record.data.dateOfBirth||''),
       String(record.data.purchaseDate||record.event_date||''),
-      Number(record.data.purchasePrice||0),
-      animalWorth(record),
-      String(record.data.currentWorth??'').trim()?'Current worth':'Purchase price fallback',
+      Math.round(Number(record.data.purchasePrice||0)),
+      Math.round(animalWorth(record)),
       record.status,
-      String(record.data.motherId||''),
       String(record.data.location||''),
-      String(record.data.notes||''),
     ]),
-  ];
-  const escape=(cell:string|number)=>`"${String(cell).replaceAll('"','""')}"`;
-  const text='\uFEFF'+rows.map(row=>row.map(escape).join(',')).join('\n');
-  const href=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));
-  const a=document.createElement('a');a.href=href;a.download=`ali-dairies-livestock-worth-${today()}.csv`;a.click();URL.revokeObjectURL(href);
+  });
+}
+
+function downloadFarmReport(records:FarmRecord[]){
+  const finance=records.filter(record=>record.module==='finance'||record.module==='dailyexpenses');
+  const income=finance.filter(record=>record.data.type==='Income').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const expense=finance.filter(record=>record.data.type==='Expense').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const present=records.filter(isPresentAnimal);
+  createAliDairiesPdf({
+    title:'Complete Farm Report',
+    subtitle:'All saved farm records and headline totals',
+    fileBase:'ali-dairies-complete-farm-report',
+    summaryTitle:'Farm summary',
+    summaryColumns:[
+      {label:'Metric',width:260},
+      {label:'Value',width:220},
+      {label:'Notes',width:300},
+    ],
+    summaryRows:[
+      ['Total income',money(income),'All recorded farm income'],
+      ['Total expenses',money(expense),'Includes daily miscellaneous expenses'],
+      ['Net profit / loss',money(income-expense),'Income minus expenses'],
+      ['Present livestock',present.length,'Animals currently on farm'],
+      ['Present livestock worth',money(present.reduce((sum,record)=>sum+animalWorth(record),0)),'Current worth; purchase price used where worth is blank'],
+    ],
+    detailTitle:'Saved records',
+    detailColumns:[
+      {label:'Module',width:105},
+      {label:'Date',width:72},
+      {label:'Reference',width:140},
+      {label:'Status',width:72},
+      {label:'Details',width:391},
+    ],
+    detailRows:records.map(record=>[
+      configs[record.module]?.label||record.module,
+      record.event_date,
+      record.record_key||record.title,
+      record.status,
+      Object.entries(record.data).filter(([key,value])=>value&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,6).map(([key,value])=>`${key.replace(/([A-Z])/g,' $1')}: ${value}`).join(' | '),
+    ]),
+  });
 }
 
 const navIcons: Record<string, typeof LayoutDashboard> = {
@@ -270,7 +488,7 @@ function AnimalsPage({records,summaryRecords,config,onAdd,refresh,notify}:{recor
   const visible=selected==='all'?records:records.filter(record=>livestockGroupOf(record)===selected);
   const selectedLabel=selected==='all'?'All animal records':livestockGroups.find(group=>group.key===selected)?.label||'Animals';
   return <>
-    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="animals" size={14}/> Livestock register</span><h1>Animals</h1><p>Cows, bulls, female goats, male goats and hens are separated below. Present worth and young stock totals update from the editable animal profiles.</p></div><div className="button-row"><button className="button" onClick={()=>downloadLivestockSheet(summaryRecords)}>Download worth sheet</button>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add animal</button>}</div></div>
+    <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="animals" size={14}/> Livestock register</span><h1>Animals</h1><p>Cows, bulls, female goats, male goats and hens are separated below. Present worth and young stock totals update from the editable animal profiles.</p></div><div className="button-row"><button className="button" onClick={()=>downloadLivestockSheet(summaryRecords)}>Download A4 PDF</button>{canWrite&&<button className="button primary" onClick={onAdd}>+ Add animal</button>}</div></div>
     <div className="metric-grid livestock-metrics"><article className="metric"><span>Present livestock</span><strong>{present.length}</strong><small>All animals currently on the farm</small></article><article className="metric"><span>Present livestock worth</span><strong>{money(totalWorth)}</strong><small>{missingWorth?`${missingWorth} record${missingWorth===1?'':'s'} still use purchase price until current worth is entered`:'Every present animal has a current worth'}</small></article><article className="metric"><span>Total goats</span><strong>{goats.length}</strong><small>{goats.filter(record=>livestockGroupOf(record)==='goats-female').length} female · {goats.filter(record=>livestockGroupOf(record)==='goats-male').length} male</small></article><article className="metric"><span>Young / babies</span><strong>{youngCount}</strong><small>Calves, kids and chicks marked as young</small></article></div>
     <section className="panel livestock-overview"><div className="panel-heading"><div><span className="section-kicker">Separate livestock sections</span><h2>Present stock & worth</h2><p>Click a section to show only those animal records. Sold, dead and transferred records stay in history but are excluded from present totals and worth.</p></div>{selected!=='all'&&<button onClick={()=>setSelected('all')}>Show all</button>}</div>
       <div className="livestock-cards">{livestockGroups.map(group=>{const grouped=present.filter(record=>livestockGroupOf(record)===group.key);const adults=grouped.filter(record=>!isYoungAnimal(record));const young=grouped.filter(isYoungAnimal);const worth=grouped.reduce((sum,record)=>sum+animalWorth(record),0);return <button type="button" className={selected===group.key?'livestock-card active':'livestock-card'} onClick={()=>setSelected(group.key)} key={group.key}><span>{group.label}</span><strong>{grouped.length}</strong><div><small>Adults<b>{adults.length}</b></small><small>{group.youngLabel}<b>{young.length}</b></small></div><em>{money(worth)}</em><i>Present worth</i></button>})}</div>
@@ -406,16 +624,12 @@ function Reports({records}:{records:FarmRecord[]}){
   const sold=animals.filter(r=>r.status==='Sold').length;
   const presentAnimals=animals.filter(isPresentAnimal);
   const livestockWorth=presentAnimals.reduce((sum,record)=>sum+animalWorth(record),0);
-  function csv(){
-    const rows=[['Module','Date','Reference','Status','Data'],...records.map(r=>[r.module,r.event_date,r.record_key||r.title,r.status,JSON.stringify(r.data)])];
-    const text=rows.map(row=>row.map(cell=>`"${String(cell).replaceAll('"','""')}"`).join(',')).join('\n');
-    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));a.download=`ali-dairies-report-${today()}.csv`;a.click();URL.revokeObjectURL(a.href);
-  }
+
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Farm decisions</span><h1>Reports</h1><p>Essential farm summaries for owners, viewing, printing and download.</p></div><div className="button-row"><button className="button" onClick={()=>window.print()}>Print / PDF</button><button className="button primary" onClick={csv}>Download Excel CSV</button></div></div>
+    <div className="page-heading"><div><span className="section-kicker">Farm decisions</span><h1>Reports</h1><p>Essential farm summaries for owners, viewing, printing and branded A4 PDF download.</p></div><div className="button-row"><button className="button" onClick={()=>window.print()}>Print page</button><button className="button primary" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button></div></div>
     <div className="metric-grid"><article className="metric"><span>Total income</span><strong>{money(income)}</strong><small>All recorded farm income</small></article><article className="metric"><span>Total expenses</span><strong>{money(expense)}</strong><small>Includes daily miscellaneous expenses</small></article><article className="metric"><span>Net profit / loss</span><strong>{money(income-expense)}</strong><small>Income minus every recorded expense</small></article><article className="metric"><span>Present livestock worth</span><strong>{money(livestockWorth)}</strong><small>{presentAnimals.length} animals currently on farm · {sold} sold in history</small></article></div>
     <section className="panel report-list"><div className="panel-heading"><div><h2>Available reports</h2><p>Each report is calculated from the same connected daily records.</p></div></div>{[['Animals','Animal list, status and complete lifecycle history'],['Weight & growth','Measurement history, gain/loss and feed suggestions'],['Health & breeding','Medicine, vaccines, pregnancy and calving'],['Fields & crops','Field-wise costs, yield and profit/loss'],['Sugarcane & GUR','Daily output, seasonal production and profit'],['Labour','Salary, payments, advances and remaining balance'],['Equipment','Current equipment condition and ownership details'],['Renovation & maintenance','Dated service, tuning, repairs, replaced parts, vendors and costs'],['Daily miscellaneous expenses','Every small dated farm expense with amount and notes'],['Money','Monthly income, every expense and farm profit/loss']].map(([a,b])=><div key={a}><strong>{a}</strong><span>{b}</span></div>)}</section>
-    <section className="panel livestock-document-panel"><div><span className="section-kicker">Livestock documents</span><h2>Complete animals & worth sheet</h2><p>Downloads cows, bulls, female goats, male goats, hens, young stock, status, purchase price and current worth, plus section totals. The CSV opens directly in Excel.</p></div><button className="button primary" onClick={()=>downloadLivestockSheet(animals)}>Download livestock worth sheet</button></section>
+    <section className="panel livestock-document-panel"><div><span className="section-kicker">Livestock documents</span><h2>Complete animals & worth sheet</h2><p>Downloads an A4 landscape PDF with Ali Dairies branding, section totals, animal details, page numbers and the exact date and time it was generated.</p></div><button className="button primary" onClick={()=>downloadLivestockSheet(animals)}>Download A4 PDF</button></section>
   </>;
 }
 
