@@ -20,7 +20,7 @@ export const sessions = sqliteTable('sessions', {
   tokenHash: text('token_hash').notNull().unique(),
   expiresAt: text('expires_at').notNull(),
   createdAt: text('created_at').notNull(),
-}, (table) => [index('idx_sessions_token').on(table.tokenHash, table.expiresAt)]);
+}, (table) => [index('idx_sessions_token').on(table.tokenHash, table.expiresAt), index('idx_sessions_user').on(table.userId)]);
 
 export const records = sqliteTable('records', {
   id: text('id').primaryKey(), module: text('module').notNull(), recordKey: text('record_key'),
@@ -42,7 +42,7 @@ export const auditLog = sqliteTable('audit_log', {
 export const files = sqliteTable('files', {
   id: text('id').primaryKey(), recordId: text('record_id'), objectKey: text('object_key').notNull().unique(), filename: text('filename').notNull(),
   contentType: text('content_type').notNull(), size: integer('size').notNull(), uploadedBy: text('uploaded_by').notNull(), createdAt: text('created_at').notNull(),
-});
+}, (table) => [index('idx_files_record').on(table.recordId)]);
 
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(), value: text('value').notNull(), updatedAt: text('updated_at').notNull(),
