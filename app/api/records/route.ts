@@ -9,6 +9,7 @@ type RecordRow = {
 };
 
 const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']);
+const keyRequiredModules = new Set(['animals','sales','fields']);
 
 function permissionModule(module: string) {
   return module === 'dailyexpenses' ? 'finance' : module;
@@ -150,6 +151,7 @@ export async function POST(request: Request) {
     const linkedId = cleanText(body.linkedId, 80) || null;
     const data = sanitizeIncomingData(body.data);
     if (!title) return errorResponse('A record name or title is required.');
+    if (keyRequiredModules.has(module) && !recordKey) return errorResponse('A tag or record number is required.');
     if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     if (module === 'sales' && recordKey) {
       const animal = await db().prepare("SELECT status FROM records WHERE module = 'animals' AND record_key = ? AND archived = 0").bind(recordKey).first<{status:string}>();
@@ -249,9 +251,8 @@ export async function PATCH(request: Request) {
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
     const eventDate = cleanText(body.eventDate, 20) || existing.event_date;
-    const keyField = ({ animals: 'tag', sales: 'animalTag', fields: 'fieldNumber', equipment: 'equipmentName' } as Record<string, string>)[existing.module];
     const recordKey = Object.hasOwn(body, 'recordKey') ? cleanText(body.recordKey, 80) || null : existing.record_key;
-    if (keyField && existing.record_key && !recordKey) return errorResponse('A tag or record number is required.');
+    if (keyRequiredModules.has(existing.module) && !recordKey) return errorResponse('A tag or record number is required.');
     if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     const now = nowIso();
     if (existing.module === 'sales' && recordKey !== existing.record_key) {
