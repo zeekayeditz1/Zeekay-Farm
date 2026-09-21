@@ -1,5 +1,5 @@
 import { AuthError, hashPassword, normalizePhone, requireUser } from '@/lib/farm-auth';
-import { audit, cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
+import { cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
 const allowedRoles = new Set(['owner','manager','accountant','vet','worker','viewer']);
 const allowedPermissionSections = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders']);
@@ -103,9 +103,13 @@ export async function POST(request: Request) {
     const permissions = normalizePermissions(body.permissions, role);
     const id = crypto.randomUUID();
     const secured = await hashPassword(password);
-    await db().prepare('INSERT INTO users (id, name, phone, password_hash, salt, role, permissions, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)')
-      .bind(id, name, phone, secured.hash, secured.salt, role, JSON.stringify(permissions), nowIso()).run();
-    await audit(owner.id, 'create', 'users', id, `Added portal user ${name}`);
+    const now = nowIso();
+    await db().batch([
+      db().prepare('INSERT INTO users (id, name, phone, password_hash, salt, role, permissions, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)')
+        .bind(id, name, phone, secured.hash, secured.salt, role, JSON.stringify(permissions), now),
+      db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(crypto.randomUUID(), owner.id, 'create', 'users', id, `Added portal user ${name}`, now),
+    ]);
     return jsonResponse({ id }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
