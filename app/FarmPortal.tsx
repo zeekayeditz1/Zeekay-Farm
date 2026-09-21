@@ -360,9 +360,9 @@ async function downloadFarmReport(records:FarmRecord[]){
   const expense=finance.filter(record=>record.data.type==='Expense').reduce((sum,record)=>sum+numberValue(record.data.amount),0);
   const present=records.filter(isPresentAnimal);
   await createAliDairiesPdf({
-    title:'Complete Farm Report',
-    subtitle:'All saved farm records and headline totals',
-    fileBase:'ali-dairies-complete-farm-report',
+    title:'Current Farm Report',
+    subtitle:'All current live farm records and headline totals',
+    fileBase:'ali-dairies-current-farm-report',
     summaryTitle:'Farm summary',
     summaryColumns:[
       {label:'Metric',width:260},
