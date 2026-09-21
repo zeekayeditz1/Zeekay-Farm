@@ -15,9 +15,76 @@ function mayWrite(user:User|null, section:string){return Boolean(user&&(user.rol
 type Field = { key: string; label: string; type?: 'text'|'number'|'date'|'select'|'textarea'; options?: string[]; required?: boolean; placeholder?: string };
 type ModuleConfig = { label: string; singular: string; description: string; icon: string; fields: Field[]; keyField?: string; titleField: string; statusOptions?: string[] };
 
-const animalTypes = ['Cow','Buffalo','Sheep','Goat','Chicken','Other'];
+const animalTypes = ['Cow','Bull','Buffalo','Sheep','Goat','Hen','Chicken','Other'];
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (value: number) => `Rs ${Math.round(value).toLocaleString('en-PK')}`;
+
+type LivestockGroupKey = 'cows'|'bulls'|'goats-female'|'goats-male'|'hens';
+const livestockGroups: Array<{key:LivestockGroupKey;label:string;youngLabel:string}> = [
+  {key:'cows',label:'Cows',youngLabel:'Female calves'},
+  {key:'bulls',label:'Bulls',youngLabel:'Male calves'},
+  {key:'goats-female',label:'Female goats',youngLabel:'Female kids'},
+  {key:'goats-male',label:'Male goats',youngLabel:'Male kids'},
+  {key:'hens',label:'Hens',youngLabel:'Female chicks'},
+];
+const isPresentAnimal=(record:FarmRecord)=>record.module==='animals'&&!['Sold','Dead','Transferred'].includes(record.status);
+const isYoungAnimal=(record:FarmRecord)=>String(record.data.lifeStage||'Adult').toLowerCase().startsWith('young');
+function livestockGroupOf(record:FarmRecord):LivestockGroupKey|null{
+  const type=String(record.data.animalType||'').toLowerCase();
+  const sex=String(record.data.sex||'').toLowerCase();
+  if(type==='bull'||(type==='cow'&&sex==='male'))return 'bulls';
+  if(type==='cow'&&sex!=='male')return 'cows';
+  if(type==='goat'&&sex==='female')return 'goats-female';
+  if(type==='goat'&&sex==='male')return 'goats-male';
+  if(type==='hen'||(type==='chicken'&&sex==='female'))return 'hens';
+  return null;
+}
+function animalWorth(record:FarmRecord){
+  const current=String(record.data.currentWorth??'').trim();
+  const value=Number(current!==''?current:record.data.purchasePrice||0);
+  return Number.isFinite(value)?value:0;
+}
+function downloadLivestockSheet(records:FarmRecord[]){
+  const animals=records.filter(record=>record.module==='animals');
+  const present=animals.filter(isPresentAnimal);
+  const summary=livestockGroups.map(group=>{
+    const groupRecords=present.filter(record=>livestockGroupOf(record)===group.key);
+    return [group.label,groupRecords.filter(record=>!isYoungAnimal(record)).length,groupRecords.filter(isYoungAnimal).length,groupRecords.length,groupRecords.reduce((sum,record)=>sum+animalWorth(record),0)];
+  });
+  const rows:Array<Array<string|number>>=[
+    ['ALI DAIRIES LIVESTOCK WORTH SHEET'],
+    ['Generated',today()],
+    [],
+    ['SECTION SUMMARY'],
+    ['Section','Adults','Young / babies','Present total','Current worth (Rs)'],
+    ...summary,
+    ['Grand total',present.filter(record=>!isYoungAnimal(record)).length,present.filter(isYoungAnimal).length,present.length,present.reduce((sum,record)=>sum+animalWorth(record),0)],
+    [],
+    ['ANIMAL DETAILS'],
+    ['Section','Tag','Animal type','Sex','Age class','Breed','Date of birth','Purchase / entry date','Purchase price (Rs)','Current worth (Rs)','Worth basis','Status','Mother tag','Location','Notes'],
+    ...animals.map(record=>[
+      livestockGroups.find(group=>group.key===livestockGroupOf(record))?.label||'Other livestock',
+      record.record_key||record.title,
+      String(record.data.animalType||''),
+      String(record.data.sex||''),
+      String(record.data.lifeStage||'Adult'),
+      String(record.data.breed||''),
+      String(record.data.dateOfBirth||''),
+      String(record.data.purchaseDate||record.event_date||''),
+      Number(record.data.purchasePrice||0),
+      animalWorth(record),
+      String(record.data.currentWorth??'').trim()?'Current worth':'Purchase price fallback',
+      record.status,
+      String(record.data.motherId||''),
+      String(record.data.location||''),
+      String(record.data.notes||''),
+    ]),
+  ];
+  const escape=(cell:string|number)=>`"${String(cell).replaceAll('"','""')}"`;
+  const text='\uFEFF'+rows.map(row=>row.map(escape).join(',')).join('\n');
+  const href=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=href;a.download=`ali-dairies-livestock-worth-${today()}.csv`;a.click();URL.revokeObjectURL(href);
+}
 
 const navIcons: Record<string, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
