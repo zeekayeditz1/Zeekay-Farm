@@ -126,5 +126,16 @@ try {
   console.error(error);process.exitCode=1;
 } finally {
   console.log('Passed '+checks+' integration assertions.');
+  try {
+    const testUsers="SELECT id FROM users WHERE id = ? OR phone LIKE ?";
+    const phonePattern=phone+'%';
+    db.prepare(`DELETE FROM files WHERE uploaded_by IN (${testUsers})`).run(testId,phonePattern);
+    db.prepare(`DELETE FROM records WHERE created_by IN (${testUsers})`).run(testId,phonePattern);
+    db.prepare(`DELETE FROM audit_log WHERE user_id IN (${testUsers})`).run(testId,phonePattern);
+    db.prepare(`DELETE FROM sessions WHERE user_id IN (${testUsers})`).run(testId,phonePattern);
+    db.prepare('DELETE FROM users WHERE id = ? OR phone LIKE ?').run(testId,phonePattern);
+  } catch(cleanupError) {
+    console.error('Local QA cleanup failed',cleanupError);
+  }
   db.close();
 }
