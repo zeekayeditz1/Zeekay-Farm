@@ -4,7 +4,7 @@ import { canCreateFirstOwner, createSession, currentUser, destroySession, hashPa
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const count = await db().prepare('SELECT COUNT(*) AS count FROM users WHERE active = 1').first<{ count: number }>();
+    const count = await db().prepare('SELECT COUNT(*) AS count FROM users').first<{ count: number }>();
     const user = await currentUser(request);
     return jsonResponse({ setupRequired: Number(count?.count || 0) === 0, user });
   } catch {
