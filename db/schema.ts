@@ -47,3 +47,10 @@ export const files = sqliteTable('files', {
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(), value: text('value').notNull(), updatedAt: text('updated_at').notNull(),
 });
+
+export const loginAttempts = sqliteTable('login_attempts', {
+  key: text('key').primaryKey(),
+  failures: integer('failures').notNull().default(0),
+  windowStartedAt: text('window_started_at').notNull(),
+  blockedUntil: text('blocked_until'),
+});
