@@ -63,7 +63,38 @@ function pdfTruncate(value:unknown,width:number,fontSize:number){
   return raw.slice(0,Math.max(1,max-3))+'...';
 }
 
-function createAliDairiesPdf(options:{
+let aliDairiesLogoPromise:Promise<{hex:string;width:number;height:number}|null>|null=null;
+function getAliDairiesLogoJpeg(){
+  if(aliDairiesLogoPromise)return aliDairiesLogoPromise;
+  aliDairiesLogoPromise=new Promise(resolve=>{
+    const image=new Image();
+    image.onload=()=>{
+      try{
+        const size=96;
+        const canvas=document.createElement('canvas');
+        canvas.width=size;canvas.height=size;
+        const context=canvas.getContext('2d');
+        if(!context){resolve(null);return}
+        context.fillStyle='#ffffff';
+        context.fillRect(0,0,size,size);
+        const scale=Math.min(size/image.width,size/image.height);
+        const width=image.width*scale;
+        const height=image.height*scale;
+        context.drawImage(image,(size-width)/2,(size-height)/2,width,height);
+        const base64=canvas.toDataURL('image/jpeg',0.9).split(',')[1];
+        const binary=atob(base64);
+        let hex='';
+        for(let i=0;i<binary.length;i++)hex+=binary.charCodeAt(i).toString(16).padStart(2,'0');
+        resolve({hex:hex.toUpperCase(),width:size,height:size});
+      }catch{resolve(null)}
+    };
+    image.onerror=()=>resolve(null);
+    image.src='/ali-livestock-logo.png';
+  });
+  return aliDairiesLogoPromise;
+}
+
+async function createAliDairiesPdf(options:{
   title:string;
   subtitle:string;
   fileBase:string;
@@ -74,6 +105,7 @@ function createAliDairiesPdf(options:{
   detailColumns:PdfColumn[];
   detailRows:Array<Array<string|number>>;
 }){
+  const logo=await getAliDairiesLogoJpeg();
   const pageWidth=841.89;
   const pageHeight=595.28;
   const margin=30;
@@ -107,8 +139,25 @@ function createAliDairiesPdf(options:{
     pages.push(page);
     rect(0,pageHeight-76,pageWidth,76,'0.07 0.23 0.15');
     rect(0,pageHeight-80,pageWidth,4,'0.91 0.68 0.20');
-    rect(30,pageHeight-62,38,38,'0.91 0.68 0.20');
-    text(39,pageHeight-49,'AD',13,true,'0.07 0.23 0.15');
+    if(logo){
+      page.push(
+        'q',
+        '38 0 0 38 30 '+(pageHeight-62).toFixed(2)+' cm',
+        'BI',
+        '/W '+logo.width,
+        '/H '+logo.height,
+        '/CS /RGB',
+        '/BPC 8',
+        '/F [/ASCIIHexDecode /DCTDecode]',
+        'ID',
+        logo.hex+'>',
+        'EI',
+        'Q'
+      );
+    }else{
+      rect(30,pageHeight-62,38,38,'0.91 0.68 0.20');
+      text(39,pageHeight-49,'AD',13,true,'0.07 0.23 0.15');
+    }
     text(82,pageHeight-36,'ALI DAIRIES',16,true,'1 1 1');
     text(82,pageHeight-52,options.title,11,true,'1 1 1');
     text(82,pageHeight-66,options.subtitle,7.5,false,'0.88 0.94 0.89');
@@ -199,7 +248,7 @@ function createAliDairiesPdf(options:{
   setTimeout(()=>URL.revokeObjectURL(href),1000);
 }
 
-function downloadLivestockSheet(records:FarmRecord[]){
+async function downloadLivestockSheet(records:FarmRecord[]){
   const animals=records.filter(record=>record.module==='animals');
   const present=animals.filter(isPresentAnimal);
   const summaryRows=livestockGroups.map(group=>{
@@ -219,7 +268,7 @@ function downloadLivestockSheet(records:FarmRecord[]){
     present.length,
     Math.round(present.reduce((sum,record)=>sum+animalWorth(record),0)),
   ]);
-  createAliDairiesPdf({
+  await createAliDairiesPdf({
     title:'Livestock Worth Sheet',
     subtitle:'Present stock, young animals and current farm valuation',
     fileBase:'ali-dairies-livestock-worth',
@@ -264,12 +313,12 @@ function downloadLivestockSheet(records:FarmRecord[]){
   });
 }
 
-function downloadFarmReport(records:FarmRecord[]){
+async function downloadFarmReport(records:FarmRecord[]){
   const finance=records.filter(record=>record.module==='finance'||record.module==='dailyexpenses');
   const income=finance.filter(record=>record.data.type==='Income').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
   const expense=finance.filter(record=>record.data.type==='Expense').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
   const present=records.filter(isPresentAnimal);
-  createAliDairiesPdf({
+  await createAliDairiesPdf({
     title:'Complete Farm Report',
     subtitle:'All saved farm records and headline totals',
     fileBase:'ali-dairies-complete-farm-report',
@@ -358,9 +407,9 @@ function sectionSummaryRows(module:string,records:FarmRecord[]):Array<Array<stri
   return rows;
 }
 
-function downloadSectionPdf(module:string,config:ModuleConfig,records:FarmRecord[]){
+async function downloadSectionPdf(module:string,config:ModuleConfig,records:FarmRecord[]){
   if(module==='animals'){downloadLivestockSheet(records);return}
-  createAliDairiesPdf({
+  await createAliDairiesPdf({
     title:`${config.label} Report`,
     subtitle:config.description,
     fileBase:`ali-dairies-${module.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}`,
@@ -393,8 +442,8 @@ function downloadSectionPdf(module:string,config:ModuleConfig,records:FarmRecord
   });
 }
 
-function downloadUsersPdf(users:Array<Record<string,unknown>>){
-  createAliDairiesPdf({
+async function downloadUsersPdf(users:Array<Record<string,unknown>>){
+  await createAliDairiesPdf({
     title:'Users & Access Report',
     subtitle:'Portal user accounts, roles and access status',
     fileBase:'ali-dairies-users-access',
