@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
-import { audit, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
+import { db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
 const allowedTypes = new Set(['image/jpeg','image/png','image/webp','application/pdf']);
 
@@ -18,12 +18,21 @@ export async function POST(request: Request) {
     if (file.size > 8 * 1024 * 1024) return errorResponse('The file must be smaller than 8 MB.');
     if (!env.FILES) return errorResponse('File storage is unavailable.', 503);
     const id = crypto.randomUUID();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100);
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'attachment';
     const key = `uploads/${new Date().toISOString().slice(0, 10)}/${id}-${safeName}`;
+    const now = nowIso();
     await env.FILES.put(key, await file.arrayBuffer(), { metadata: { contentType: file.type } });
-    await db().prepare('INSERT INTO files (id, record_id, object_key, filename, content_type, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(id, recordId, key, safeName, file.type, file.size, user.id, nowIso()).run();
-    await audit(user.id, 'upload', 'files', id, `Uploaded ${safeName}`);
+    try {
+      await db().batch([
+        db().prepare('INSERT INTO files (id, record_id, object_key, filename, content_type, size, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(id, recordId, key, safeName, file.type, file.size, user.id, now),
+        db().prepare('INSERT INTO audit_log (id, user_id, action, module, record_id, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .bind(crypto.randomUUID(), user.id, 'upload', 'files', id, `Uploaded ${safeName}`, now),
+      ]);
+    } catch (error) {
+      await Promise.allSettled([env.FILES.delete(key)]);
+      throw error;
+    }
     return jsonResponse({ id, filename: safeName }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
@@ -47,6 +56,7 @@ export async function GET(request: Request) {
       .first<{ object_key: string; filename: string; content_type: string; record_id: string }>();
     if (!row) return errorResponse('Attachment not found.', 404);
     await requireRecordAccess(request, row.record_id, false);
+    if (!env.FILES) return errorResponse('File storage is unavailable.', 503);
     const value = await env.FILES.get(row.object_key, 'arrayBuffer');
     if (!value) return errorResponse('Attachment data is unavailable.', 404);
     return new Response(value, {
@@ -79,9 +89,13 @@ export async function DELETE(request: Request) {
     const file = await db().prepare('SELECT record_id, object_key, filename FROM files WHERE id = ?').bind(String(body.id||'').slice(0,80)).first<{record_id:string;object_key:string;filename:string}>();
     if (!file) return errorResponse('Attachment not found.',404);
     const user = await requireRecordAccess(request,file.record_id,true);
-    await env.FILES.delete(file.object_key);
-    await db().prepare('DELETE FROM files WHERE id = ?').bind(body.id).run();
-    await audit(user.id,'delete','files',body.id||null,`Deleted attachment ${file.filename}`);
+    const now = nowIso();
+    await db().batch([
+      db().prepare('DELETE FROM files WHERE id = ?').bind(body.id),
+      db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(crypto.randomUUID(),user.id,'delete','files',body.id||null,`Deleted attachment ${file.filename}`,now),
+    ]);
+    if (env.FILES) await Promise.allSettled([env.FILES.delete(file.object_key)]);
     return jsonResponse({ok:true});
   } catch(error) {
     if (error instanceof AuthError) return errorResponse(error.message,error.status);
