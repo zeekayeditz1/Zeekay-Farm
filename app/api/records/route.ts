@@ -10,6 +10,14 @@ type RecordRow = {
 
 const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']);
 const keyRequiredModules = new Set(['animals','sales']);
+const statusRules: Record<string, Set<string>> = {
+  animals: new Set(['Active','Quarantine','Sick','Pregnant','Sold','Dead','Transferred']),
+  sales: new Set(['Sold','Dead','Transferred']),
+};
+
+function validStatus(module: string, status: string) {
+  return !statusRules[module] || statusRules[module].has(status);
+}
 
 function permissionModule(module: string) {
   return module === 'dailyexpenses' ? 'finance' : module;
@@ -101,6 +109,7 @@ export async function GET(request: Request) {
     if (module && !allowedModules.has(module)) return errorResponse('Unknown farm section.');
     if (module && !canAccess(user, permissionModule(module))) return errorResponse('You do not have access to this section.', 403);
     const archived = url.searchParams.get('archived') === '1' ? 1 : 0;
+    if (archived && !['owner','manager'].includes(user.role)) return errorResponse('Only an owner or manager can view archived records.', 403);
     const requestedLimit = Number(url.searchParams.get('limit') || 500);
     const requestedOffset = Number(url.searchParams.get('offset') || 0);
     const limit = Number.isFinite(requestedLimit) ? Math.min(500, Math.max(1, Math.trunc(requestedLimit))) : 500;
@@ -123,7 +132,7 @@ export async function GET(request: Request) {
     }
     const result = await db().prepare(
       `SELECT r.*, u.name AS created_by_name FROM records r LEFT JOIN users u ON u.id = r.created_by
-       WHERE ${clauses.join(' AND ')} ORDER BY r.event_date DESC, r.created_at DESC LIMIT ? OFFSET ?`,
+       WHERE ${clauses.join(' AND ')} ORDER BY r.event_date DESC, r.created_at DESC, r.id DESC LIMIT ? OFFSET ?`,
     ).bind(...bindings, limit + 1, offset).all<RecordRow>();
     const page = result.results.slice(0, limit);
     const hasMore = result.results.length > limit;
@@ -147,7 +156,8 @@ export async function POST(request: Request) {
     const title = cleanText(body.title, 150);
     const requestedRecordKey = cleanText(body.recordKey, 80) || null;
     const recordKey = keyRequiredModules.has(module) ? requestedRecordKey : null;
-    const status = cleanText(body.status, 30) || 'active';
+    const status = cleanText(body.status, 30) || 'Active';
+    if (!validStatus(module, status)) return errorResponse('Choose a valid record status.');
     const eventDate = cleanText(body.eventDate, 20) || farmDate();
     const linkedId = cleanText(body.linkedId, 80) || null;
     const data = sanitizeIncomingData(body.data);
@@ -251,6 +261,7 @@ export async function PATCH(request: Request) {
     const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...sanitizeIncomingData(body.data) } : previousData;
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
+    if (!validStatus(existing.module, status)) return errorResponse('Choose a valid record status.');
     const eventDate = cleanText(body.eventDate, 20) || existing.event_date;
     const recordKey = keyRequiredModules.has(existing.module)
       ? (Object.hasOwn(body, 'recordKey') ? cleanText(body.recordKey, 80) || null : existing.record_key)
