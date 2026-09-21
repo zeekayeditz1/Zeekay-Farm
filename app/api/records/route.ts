@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
 import { audit, cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
@@ -254,14 +255,17 @@ export async function DELETE(request: Request) {
     if (!existing) return errorResponse('Record not found.', 404);
     if (!canAccess(user, permissionModule(existing.module), true)) return errorResponse('You cannot delete this record.', 403);
     const now = nowIso();
-    // Keep a private audit copy, but remove the entry and its pending follow-ups from all live views and totals.
+    const attachments = await db().prepare('SELECT id, object_key FROM files WHERE record_id = ?').bind(id).all<{id:string;object_key:string}>();
+    // Keep a private audit copy of the record, but remove the live entry, pending follow-ups and its uploaded attachments.
     const statements = [
       db().prepare('UPDATE records SET archived = 2, updated_at = ? WHERE id = ?').bind(now, id),
       db().prepare("UPDATE records SET archived = 2, updated_at = ? WHERE module = 'reminders' AND linked_id = ? AND archived = 0").bind(now, id),
+      db().prepare('DELETE FROM files WHERE record_id = ?').bind(id),
       db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)').bind(crypto.randomUUID(), user.id, 'delete', existing.module, id, `Deleted ${existing.title}`, now),
     ];
     if (existing.module === 'sales' && existing.record_key) statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(JSON.parse(existing.data || '{}').previousAnimalStatus,30)));
     await db().batch(statements);
+    if (env.FILES) await Promise.allSettled(attachments.results.map((file) => env.FILES.delete(file.object_key)));
     return jsonResponse({ ok: true });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
