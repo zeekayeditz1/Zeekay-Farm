@@ -810,11 +810,16 @@ function RecordForm({module,config,record,onClose,onSaved}:{module:string;config
   const [form,setForm]=useState<Record<string,string>>(initial);
   const [status,setStatus]=useState(record?.status||config.statusOptions?.[0]||'Active');
   const [attachment,setAttachment]=useState<File|null>(null);
-  const [reminderEnabled,setReminderEnabled]=useState(record?module==='reminders'?Number(record.data.intervalValue||record.data.reminderIntervalValue||0)>0:record.data.reminderEnabled==='yes'||(record.data.reminderEnabled!=='no'&&Boolean(record.data.nextDate||record.data.nextMaintenanceDate||record.data.expectedCalvingDate)):['health','breeding','equipment','maintenance','reminders'].includes(module));
+  const storedIntervalValue=Number(record?.data.intervalValue||record?.data.reminderIntervalValue||0);
+  const storedIntervalUnit=String(record?.data.intervalUnit||record?.data.reminderIntervalUnit||'months');
+  const storedReminderDate=String(record?.data.reminderDate||'');
+  const storedBuiltInDate=String(record?.data.nextDate||record?.data.nextMaintenanceDate||record?.data.expectedCalvingDate||record?.data.pregnancyCheckDate||'');
+  const legacyDerivedReminderDate=Boolean(record&&module!=='reminders'&&storedReminderDate&&!storedBuiltInDate&&storedIntervalValue>0&&storedReminderDate===addReminderInterval(record.event_date,storedIntervalValue,storedIntervalUnit));
+  const [reminderEnabled,setReminderEnabled]=useState(record?module==='reminders'?storedIntervalValue>0:record.data.reminderEnabled==='yes'||(record.data.reminderEnabled!=='no'&&Boolean(record.data.nextDate||record.data.nextMaintenanceDate||record.data.expectedCalvingDate)):['health','breeding','equipment','maintenance'].includes(module));
   const [reminderTitle,setReminderTitle]=useState(String(record?.data.reminderTitle||''));
   const [reminderIntervalValue,setReminderIntervalValue]=useState(String(record?.data.intervalValue||record?.data.reminderIntervalValue||''));
-  const [reminderIntervalUnit,setReminderIntervalUnit]=useState(String(record?.data.intervalUnit||record?.data.reminderIntervalUnit||'months'));
-  const [reminderExactDate,setReminderExactDate]=useState(String(record?.data.reminderDate||''));
+  const [reminderIntervalUnit,setReminderIntervalUnit]=useState(storedIntervalUnit);
+  const [reminderExactDate,setReminderExactDate]=useState(legacyDerivedReminderDate?'':storedReminderDate);
   const [savedId,setSavedId]=useState(record?.id||'');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
@@ -839,7 +844,7 @@ function RecordForm({module,config,record,onClose,onSaved}:{module:string;config
     e.preventDefault();setBusy(true);setError('');
     try{
       if(reminderEnabled&&!computedReminderDate&&module!=='reminders')throw new Error('Choose an exact reminder date or enter a repeat interval.');
-      const data={...record?.data,...form,...(module==='dailyexpenses'?{type:'Expense',expenseKind:'Daily miscellaneous'}:{}),reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:computedReminderDate,reminderIntervalValue:reminderEnabled?reminderIntervalValue:'',reminderIntervalUnit,...(module==='reminders'?{intervalValue:reminderEnabled?reminderIntervalValue:'',intervalUnit:reminderIntervalUnit,recurrenceEnabled:reminderEnabled&&Number(reminderIntervalValue)>0?'yes':'no'}:{}),...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:module==='weights'?{estimatedWeight:'',dailyGreenFodder:'',dailyDryFodder:'',dailyConcentrate:'',weightNotice:''}:{})};
+      const data={...record?.data,...form,...(module==='dailyexpenses'?{type:'Expense',expenseKind:'Daily miscellaneous'}:{}),reminderEnabled:reminderEnabled?'yes':'no',reminderTitle:reminderTitle||suggestedReminderTitle,reminderDate:reminderEnabled?reminderExactDate:'',reminderIntervalValue:reminderEnabled?reminderIntervalValue:'',reminderIntervalUnit,...(module==='reminders'?{intervalValue:reminderEnabled?reminderIntervalValue:'',intervalUnit:reminderIntervalUnit,recurrenceEnabled:reminderEnabled&&Number(reminderIntervalValue)>0?'yes':'no'}:{}),...(estimated?{estimatedWeight:estimated.weight.toFixed(1),dailyGreenFodder:estimated.green.toFixed(1),dailyDryFodder:estimated.dry.toFixed(1),dailyConcentrate:estimated.concentrate.toFixed(1),weightNotice:'Estimate only — verify with a scale when available.'}:module==='weights'?{estimatedWeight:'',dailyGreenFodder:'',dailyDryFodder:'',dailyConcentrate:'',weightNotice:''}:{})};
       const title=form[config.titleField]||config.singular;
       const saved=await api<{id:string}>('/api/records',{method:savedId?'PATCH':'POST',body:JSON.stringify({id:savedId||undefined,module,title,recordKey:config.keyField?form[config.keyField]:null,status,eventDate,data})});
       setSavedId(saved.id);
