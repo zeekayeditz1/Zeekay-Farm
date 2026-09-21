@@ -9,7 +9,7 @@ type RecordRow = {
 };
 
 const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']);
-const keyRequiredModules = new Set(['animals','sales','fields']);
+const keyRequiredModules = new Set(['animals','sales']);
 
 function permissionModule(module: string) {
   return module === 'dailyexpenses' ? 'finance' : module;
@@ -273,10 +273,6 @@ export async function PATCH(request: Request) {
       }
       statements.push(db().prepare("UPDATE records SET data = json_set(data, '$.linkedReference', ?), updated_at = ? WHERE module = 'reminders' AND json_extract(data, '$.linkedReference') = ?")
         .bind(recordKey, now, existing.record_key));
-    }
-    if (existing.module === 'fields' && existing.record_key && recordKey !== existing.record_key) {
-      statements.push(db().prepare("UPDATE records SET data = json_set(data, '$.fieldNumber', ?), title = CASE WHEN title = ? THEN ? ELSE title END, updated_at = ? WHERE module = 'gur' AND json_extract(data, '$.fieldNumber') = ?")
-        .bind(recordKey, existing.record_key, recordKey, now, existing.record_key));
     }
     if (existing.module === 'sales') {
       if (existing.record_key && existing.record_key !== recordKey) statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(previousData.previousAnimalStatus,30)));
