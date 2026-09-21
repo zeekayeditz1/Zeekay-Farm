@@ -211,7 +211,8 @@ export default function FarmPortal() {
       <div className="page-body">
         {message&&<div className="toast" role="status">{message}<button onClick={()=>setMessage('')}>×</button></div>}
         {section==='dashboard'&&<Dashboard records={records} open={(target,add=true)=>{setSection(target);setShowForm(add)}}/>}
-        {config&&section!=='finance'&&<ModulePage key={section} module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
+        {section==='animals'&&config&&<AnimalsPage records={sectionRecords} summaryRecords={records.filter(record=>record.module==='animals')} config={config} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
+        {config&&section!=='finance'&&section!=='animals'&&<ModulePage key={section} module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
         {section==='finance'&&<FinancePage records={records} search={search} refresh={loadRecords} notify={setMessage}/>}
         {section==='reports'&&<Reports records={records}/>}
         {section==='users'&&<Users currentUser={auth.user} notify={setMessage}/>}
