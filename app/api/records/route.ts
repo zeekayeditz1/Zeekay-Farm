@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
-import { audit, cleanText, db, ensureDatabase, errorResponse, farmDate, isDateOnly, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
+import { cleanText, db, ensureDatabase, errorResponse, farmDate, isDateOnly, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
 type RecordRow = {
   id: string; module: string; record_key: string | null; title: string; status: string;
@@ -42,18 +42,18 @@ function defaultReminderTitle(sourceModule: string, title: string, data: Record<
   return `${title} — follow-up`;
 }
 
-async function addAutomaticReminder(userId: string, sourceId: string, sourceModule: string, title: string, eventDate: string, data: Record<string, unknown>) {
-  if (data.reminderEnabled === 'no') return;
+function automaticReminderStatement(userId: string, sourceId: string, sourceModule: string, title: string, eventDate: string, data: Record<string, unknown>) {
+  if (data.reminderEnabled === 'no') return null;
   const intervalValue = Number(data.reminderIntervalValue || 0);
   const intervalUnit = cleanText(data.reminderIntervalUnit, 10) || 'months';
   const explicitDate = cleanText(data.reminderDate || data.nextDate || data.nextCheckDate || data.nextMaintenanceDate || data.expectedCalvingDate, 20);
   const nextDate = explicitDate || (data.reminderEnabled === 'yes' ? addInterval(eventDate, intervalValue, intervalUnit) : '');
-  if (!nextDate) return;
+  if (!nextDate || !isDateOnly(nextDate)) return null;
   const id = crypto.randomUUID();
   const now = nowIso();
   const linkedReference = cleanText(data.animalTag || data.tag || data.assetName || data.equipmentName || data.fieldNumber || data.workerName || data.linkedReference, 100);
   const reminderTitle = cleanText(data.reminderTitle, 150) || defaultReminderTitle(sourceModule, title, data);
-  await db().prepare(
+  return db().prepare(
     'INSERT INTO records (id, module, title, status, event_date, linked_id, data, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).bind(id, 'reminders', reminderTitle, 'upcoming', nextDate, sourceId, JSON.stringify({
     task: reminderTitle, nextDate, sourceModule,
@@ -63,7 +63,7 @@ async function addAutomaticReminder(userId: string, sourceId: string, sourceModu
     intervalUnit,
     recurrenceEnabled: intervalValue > 0 ? 'yes' : 'no',
     originalEventDate: eventDate,
-  }), userId, now, now).run();
+  }), userId, now, now);
 }
 
 export async function GET(request: Request) {
@@ -134,17 +134,27 @@ export async function POST(request: Request) {
     }
     const id = crypto.randomUUID();
     const now = nowIso();
-    await db().prepare(
-      `INSERT INTO records (id, module, record_key, title, status, event_date, linked_id, data, archived, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-    ).bind(id, module, recordKey, title, status, eventDate, linkedId, JSON.stringify(data), user.id, now, now).run();
-    await audit(user.id, 'create', module, id, `Added ${title}`);
+    const statements: D1PreparedStatement[] = [
+      db().prepare(
+        `INSERT INTO records (id, module, record_key, title, status, event_date, linked_id, data, archived, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      ).bind(id, module, recordKey, title, status, eventDate, linkedId, JSON.stringify(data), user.id, now, now),
+      db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(crypto.randomUUID(), user.id, 'create', module, id, `Added ${title}`, now),
+    ];
     if (module === 'sales' && recordKey) {
-      await db().prepare("UPDATE records SET status = ?, updated_at = ? WHERE module = 'animals' AND record_key = ? AND archived = 0")
-        .bind(status, now, recordKey).run();
-      await audit(user.id, 'status', 'animals', null, `Marked animal ${recordKey} as ${status}`);
+      statements.push(
+        db().prepare("UPDATE records SET status = ?, updated_at = ? WHERE module = 'animals' AND record_key = ? AND archived = 0")
+          .bind(status, now, recordKey),
+        db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)')
+          .bind(crypto.randomUUID(), user.id, 'status', 'animals', null, `Marked animal ${recordKey} as ${status}`, now),
+      );
     }
-    if (module !== 'reminders') await addAutomaticReminder(user.id, id, module, title, eventDate, data);
+    if (module !== 'reminders') {
+      const reminder = automaticReminderStatement(user.id, id, module, title, eventDate, data);
+      if (reminder) statements.push(reminder);
+    }
+    await db().batch(statements);
     return jsonResponse({ id }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
