@@ -641,7 +641,7 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const income=finances.filter(r=>r.data.type==='Income').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
   const expense=finances.filter(r=>r.data.type==='Expense').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
   const cards=[
-    ['Active animals',String(activeAnimals),'Cows, buffaloes, sheep, goats and chickens'],
+    ['Active animals',String(activeAnimals),'Cows, bulls, goats, hens and other active livestock'],
     ['Overdue / today',String(overdue.length+dueToday.length),overdue.length?`${overdue.length} overdue task${overdue.length===1?'':'s'}`:'Nothing overdue'],
     ['Next 30 days',String(dueSoon.length),'Vaccines, gestation, service and farm work'],
     ['Farm net result',money(income-expense),'Income minus expenses'],
@@ -868,7 +868,7 @@ function Users({currentUser,notify}:{currentUser:User;notify:(s:string)=>void}){
   }
   if(currentUser.role!=='owner')return <Empty title="Owner access only" text="Only farm owners can manage user accounts and permissions."/>;
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><button className="button" onClick={()=>downloadUsersPdf(users)}>Download A4 PDF</button><a className="button" href="/api/backup">Download backup</a><button className="button primary" onClick={()=>edit()}>+ Add portal user</button></div></div>
+    <div className="page-heading"><div><span className="section-kicker">Security</span><h1>Users & Access</h1><p>Owners have full access. Give workers only the sections they need.</p></div><div className="button-row"><button className="button" onClick={()=>downloadUsersPdf(users)}>Download A4 PDF</button><a className="button" href="/api/backup">Download database backup</a><button className="button primary" onClick={()=>edit()}>+ Add portal user</button></div></div>
     {show&&<section className="panel inline-form"><h2>{editing?'Edit portal user':'Add portal user'}</h2><form onSubmit={save}>
       <label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></label>
       <label>Phone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} required/></label>
