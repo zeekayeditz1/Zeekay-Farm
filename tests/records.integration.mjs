@@ -50,6 +50,7 @@ try {
   }
   await request('/api/records','POST',{module:'finance',title:'Invalid date',status:'Active',eventDate:'2026-02-31',data:{amount:'1'}},400);
   await request('/api/records','POST',{module:'animals',title:'Missing tag',status:'Active',eventDate:'2026-09-21',data:{tag:''}},400);
+  await request('/api/records','POST',{module:'sales',title:prefix+'-bad-sale',recordKey:prefix+'-bad-sale',status:'Active',eventDate:'2026-09-21',data:{animalTag:prefix+'-bad-sale'}},400);
   const fieldHistoryName=prefix+'-field-history';
   await request('/api/records','POST',{module:'fields',title:fieldHistoryName,status:'Active',eventDate:'2026-09-19',data:{fieldNumber:fieldHistoryName,cropName:'Wheat'}},201);
   await request('/api/records','POST',{module:'fields',title:fieldHistoryName,status:'Active',eventDate:'2026-09-20',data:{fieldNumber:fieldHistoryName,cropName:'Cotton'}},201);
@@ -66,6 +67,17 @@ try {
   await request('/api/records','PATCH',{id:reminders[0].id,action:'complete'});
   check(!(await records()).some(r=>r.linked_id===health),'Turning recurrence off stops the next reminder');
   await request('/api/records','PATCH',{id:reminders[0].id,action:'restore'},409);
+  const intervalHealth=await add('health',{animalTag:prefix,medicine:'Interval vaccine',checkDate:'2026-09-21',reminderEnabled:'yes',reminderDate:'',reminderIntervalValue:'1',reminderIntervalUnit:'months'});
+  let intervalReminder=(await records()).find(r=>r.linked_id===intervalHealth);
+  check(intervalReminder?.event_date==='2026-10-21','Interval-only reminder is derived from the source date');
+  await request('/api/records','PATCH',{id:intervalHealth,eventDate:'2026-09-25',data:{checkDate:'2026-09-25'}});
+  intervalReminder=(await records()).find(r=>r.linked_id===intervalHealth);
+  check(intervalReminder?.event_date==='2026-10-25','Changing a source date reschedules its interval reminder');
+  await request('/api/records','DELETE',{id:intervalHealth});
+  const recurringReminder=await add('reminders',{task:'Recurring QA reminder',nextDate:'2026-09-21',intervalValue:'1',intervalUnit:'months',reminderEnabled:'yes',recurrenceEnabled:'yes'});
+  await request('/api/records','PATCH',{id:recurringReminder,action:'complete'});
+  const nextRecurring=(await records()).find(r=>r.linked_id===recurringReminder);
+  check(Boolean(nextRecurring)&&nextRecurring.data.nextDate===nextRecurring.event_date,'Recurring reminder stores its new due date consistently');
   const weight=await add('weights',{animalTag:prefix,notes:'Linked history'});
   await request('/api/records','PATCH',{id:animal,recordKey:prefix+'-new',title:prefix+'-new',data:{tag:prefix+'-new'}});
   check((await get(weight)).data.animalTag===prefix+'-new','Animal tag correction updates linked history');
@@ -95,6 +107,7 @@ try {
   check((await request('/api/users')).result.users.some(u=>u.id===viewer&&u.permissions.includes('health:read')),'Same-role permission edits persist');
   const viewerLogin=await request('/api/auth','POST',{action:'login',phone:viewerPhone,password});
   const viewerCookie=viewerLogin.response.headers.get('set-cookie').split(';')[0];
+  await request('/api/records?module=animals&archived=1','GET',undefined,403,viewerCookie);
   await request('/api/records','PATCH',{id:animal,title:'Forbidden'},403,viewerCookie);
   await request('/api/records','DELETE',{id:animal},403,viewerCookie);
   await request('/api/records','DELETE',{id:animal},401,'');
@@ -104,6 +117,8 @@ try {
   await request('/api/users','DELETE',{id:viewer});
   check(!(await request('/api/users')).result.users.some(u=>u.id===viewer),'User deletion removes account from list');
   await request('/api/records','GET',undefined,401,viewerCookie);
+  const fakeForm=new FormData();fakeForm.append('recordId',animal);fakeForm.append('file',new Blob(['not-a-pdf'],{type:'application/pdf'}),'fake.pdf');
+  const fakeUpload=await fetch(origin+'/api/upload',{method:'POST',headers:{Cookie:cookie,Origin:origin},body:fakeForm});assert.equal(fakeUpload.status,400);
   const form=new FormData();form.append('recordId',animal);form.append('file',new Blob(['%PDF-1.4\nlocal-test'],{type:'application/pdf'}),'qa-receipt.pdf');
   const uploaded=await fetch(origin+'/api/upload',{method:'POST',headers:{Cookie:cookie,Origin:origin},body:form});assert.equal(uploaded.status,201);
   const fileId=(await uploaded.json()).id;
