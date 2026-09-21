@@ -23,7 +23,8 @@ function farmDate(value=new Date()){
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 const today = () => farmDate();
-const money = (value: number) => `Rs ${Math.round(value).toLocaleString('en-PK')}`;
+const numberValue=(value:unknown)=>{const parsed=Number(value??0);return Number.isFinite(parsed)?parsed:0};
+const money = (value: number) => `Rs ${Math.round(numberValue(value)).toLocaleString('en-PK')}`;
 
 type LivestockGroupKey = 'cows'|'bulls'|'goats-female'|'goats-male'|'hens';
 const livestockGroups: Array<{key:LivestockGroupKey;label:string;youngLabel:string}> = [
@@ -313,10 +314,36 @@ async function downloadLivestockSheet(records:FarmRecord[]){
   });
 }
 
+const pdfHiddenDataKeys=new Set([
+  'reminderEnabled','reminderTitle','reminderDate','reminderIntervalValue','reminderIntervalUnit',
+  'recurrenceEnabled','previousReminderId','sourceId','weightNotice',
+]);
+function pdfFieldLabel(key:string){
+  return key.replace(/([A-Z])/g,' $1').replace(/^./,letter=>letter.toUpperCase()).trim();
+}
+function splitPdfDetail(value:unknown,max=88){
+  const text=String(value??'').replace(/\s+/g,' ').trim();
+  if(!text)return [''];
+  const chunks:string[]=[];
+  let rest=text;
+  while(rest.length>max){
+    let cut=rest.lastIndexOf(' ',max);
+    if(cut<Math.floor(max*.55))cut=max;
+    chunks.push(rest.slice(0,cut).trim());
+    rest=rest.slice(cut).trim();
+  }
+  if(rest)chunks.push(rest);
+  return chunks.length?chunks:[''];
+}
+function recordDataEntries(record:FarmRecord){
+  const entries=Object.entries(record.data).filter(([key,value])=>value!==''&&value!==null&&value!==undefined&&!pdfHiddenDataKeys.has(key));
+  return entries.length?entries:[['Details',record.title] as [string,string|number]];
+}
+
 async function downloadFarmReport(records:FarmRecord[]){
   const finance=records.filter(record=>record.module==='finance'||record.module==='dailyexpenses');
-  const income=finance.filter(record=>record.data.type==='Income').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
-  const expense=finance.filter(record=>record.data.type==='Expense').reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const income=finance.filter(record=>record.data.type==='Income').reduce((sum,record)=>sum+numberValue(record.data.amount),0);
+  const expense=finance.filter(record=>record.data.type==='Expense').reduce((sum,record)=>sum+numberValue(record.data.amount),0);
   const present=records.filter(isPresentAnimal);
   await createAliDairiesPdf({
     title:'Complete Farm Report',
@@ -335,21 +362,25 @@ async function downloadFarmReport(records:FarmRecord[]){
       ['Present livestock',present.length,'Animals currently on farm'],
       ['Present livestock worth',money(present.reduce((sum,record)=>sum+animalWorth(record),0)),'Current worth; purchase price used where worth is blank'],
     ],
-    detailTitle:'Saved records',
+    detailTitle:'Saved record details',
     detailColumns:[
-      {label:'Module',width:105},
-      {label:'Date',width:72},
-      {label:'Reference',width:140},
-      {label:'Status',width:72},
-      {label:'Details',width:391},
+      {label:'Module',width:90},
+      {label:'Date',width:65},
+      {label:'Reference',width:105},
+      {label:'Field',width:120},
+      {label:'Value',width:340},
+      {label:'Status',width:60},
     ],
-    detailRows:records.map(record=>[
-      configs[record.module]?.label||record.module,
-      record.event_date,
-      record.record_key||record.title,
-      record.status,
-      Object.entries(record.data).filter(([key,value])=>value&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit'].includes(key)).slice(0,6).map(([key,value])=>`${key.replace(/([A-Z])/g,' $1')}: ${value}`).join(' | '),
-    ]),
+    detailRows:records.flatMap(record=>recordDataEntries(record).flatMap(([key,value])=>
+      splitPdfDetail(value).map((chunk,index)=>[
+        index===0?(configs[record.module]?.label||record.module):'',
+        index===0?record.event_date:'',
+        index===0?(record.record_key||record.title):'',
+        index===0?pdfFieldLabel(key):'',
+        chunk,
+        index===0?record.status:'',
+      ])
+    )),
   });
 }
 
@@ -358,19 +389,19 @@ function sectionSummaryRows(module:string,records:FarmRecord[]):Array<Array<stri
     ['Saved records',records.length,'Current visible records in this section'],
     ['Latest record',records.length?[...records].sort((a,b)=>b.event_date.localeCompare(a.event_date))[0].event_date:'-','Most recent saved date'],
   ];
-  const sum=(key:string)=>records.reduce((total,record)=>total+Number(record.data[key]||0),0);
+  const sum=(key:string)=>records.reduce((total,record)=>total+numberValue(record.data[key]),0);
   if(module==='sales'){
     rows.push(['Total sale / exit value',money(sum('salePrice')),'Recorded sale/value amounts']);
     rows.push(['Net result',money(sum('netResult')),'Combined recorded profit/loss']);
   }else if(module==='health'){
     rows.push(['Health / medicine cost',money(sum('cost')),'Combined recorded treatment cost']);
   }else if(module==='milk'){
-    const litres=records.reduce((total,record)=>total+Number(record.data.totalLitres||Number(record.data.morningLitres||0)+Number(record.data.eveningLitres||0)),0);
+    const litres=records.reduce((total,record)=>total+(String(record.data.totalLitres??'').trim()?numberValue(record.data.totalLitres):numberValue(record.data.morningLitres)+numberValue(record.data.eveningLitres)),0);
     rows.push(['Total milk',`${litres.toLocaleString('en-PK')} L`,'Combined recorded production']);
     rows.push(['Milk sale income',money(sum('saleIncome')),'Combined recorded milk income']);
   }else if(module==='fields'){
     const costKeys=['seedCost','cultivationCost','fertilizerCost','sprayCost','irrigationCost','labourCost','otherCost'];
-    const costs=records.reduce((total,record)=>total+costKeys.reduce((sub,key)=>sub+Number(record.data[key]||0),0),0);
+    const costs=records.reduce((total,record)=>total+costKeys.reduce((sub,key)=>sub+numberValue(record.data[key]),0),0);
     rows.push(['Recorded crop costs',money(costs),'Seed, cultivation, fertilizer, spray, irrigation, labour and other']);
     rows.push(['Sale income',money(sum('saleIncome')),'Combined field sale income']);
   }else if(module==='gur'){
@@ -385,8 +416,8 @@ function sectionSummaryRows(module:string,records:FarmRecord[]):Array<Array<stri
   }else if(module==='maintenance'){
     rows.push(['Maintenance / renovation spend',money(sum('totalCost')),'Combined recorded expenses']);
   }else if(module==='finance'){
-    const income=records.filter(record=>record.data.type==='Income').reduce((total,record)=>total+Number(record.data.amount||0),0);
-    const expense=records.filter(record=>record.data.type==='Expense').reduce((total,record)=>total+Number(record.data.amount||0),0);
+    const income=records.filter(record=>record.data.type==='Income').reduce((total,record)=>total+numberValue(record.data.amount),0);
+    const expense=records.filter(record=>record.data.type==='Expense').reduce((total,record)=>total+numberValue(record.data.amount),0);
     rows.push(['Income',money(income),'Income entries in this view']);
     rows.push(['Expenses',money(expense),'Expense entries in this view']);
     rows.push(['Net result',money(income-expense),'Income minus expenses']);
@@ -422,23 +453,23 @@ async function downloadSectionPdf(module:string,config:ModuleConfig,records:Farm
     summaryRows:sectionSummaryRows(module,records),
     detailTitle:`${config.label} details`,
     detailColumns:[
-      {label:'Date',width:75},
-      {label:'Reference',width:130},
-      {label:'Status',width:78},
-      {label:'Entered by',width:105},
-      {label:'Details',width:392},
+      {label:'Date',width:65},
+      {label:'Reference',width:110},
+      {label:'Field',width:125},
+      {label:'Value',width:335},
+      {label:'Entered by',width:85},
+      {label:'Status',width:60},
     ],
-    detailRows:records.map(record=>[
-      record.event_date,
-      record.record_key||record.title,
-      module==='reminders'?(record.event_date<today()?'Overdue':record.event_date===today()?'Due today':'Upcoming'):record.status,
-      record.created_by_name||'Farm user',
-      Object.entries(record.data)
-        .filter(([key,value])=>value&&!['reminderEnabled','reminderIntervalValue','reminderIntervalUnit','reminderIntervalUnit'].includes(key))
-        .slice(0,9)
-        .map(([key,value])=>`${key.replace(/([A-Z])/g,' $1')}: ${value}`)
-        .join(' | '),
-    ]),
+    detailRows:records.flatMap(record=>recordDataEntries(record).flatMap(([key,value])=>
+      splitPdfDetail(value).map((chunk,index)=>[
+        index===0?record.event_date:'',
+        index===0?(record.record_key||record.title):'',
+        index===0?pdfFieldLabel(key):'',
+        chunk,
+        index===0?(record.created_by_name||'Farm user'):'',
+        index===0?(module==='reminders'?(record.event_date<today()?'Overdue':record.event_date===today()?'Due today':'Upcoming'):record.status):'',
+      ])
+    )),
   });
 }
 
@@ -638,8 +669,8 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const soonDate=addReminderInterval(today(),30,'days');
   const dueSoon=reminders.filter(r=>r.event_date>today()&&r.event_date<=soonDate);
   const finances=records.filter(r=>r.module==='finance'||r.module==='dailyexpenses');
-  const income=finances.filter(r=>r.data.type==='Income').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
-  const expense=finances.filter(r=>r.data.type==='Expense').reduce((sum,r)=>sum+Number(r.data.amount||0),0);
+  const income=finances.filter(r=>r.data.type==='Income').reduce((sum,r)=>sum+numberValue(r.data.amount),0);
+  const expense=finances.filter(r=>r.data.type==='Expense').reduce((sum,r)=>sum+numberValue(r.data.amount),0);
   const cards=[
     ['Active animals',String(activeAnimals),'Cows, bulls, goats, hens and other active livestock'],
     ['Overdue / today',String(overdue.length+dueToday.length),overdue.length?`${overdue.length} overdue task${overdue.length===1?'':'s'}`:'Nothing overdue'],
@@ -696,9 +727,9 @@ function FinancePage({records,search,refresh,notify}:{records:FarmRecord[];searc
   const canWrite=mayWrite(user,tab);
   const filtered=records.filter(record=>record.module===tab&&(!search||`${record.title} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
   const dailyRecords=records.filter(record=>record.module==='dailyexpenses');
-  const todayTotal=dailyRecords.filter(record=>record.event_date===today()).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const todayTotal=dailyRecords.filter(record=>record.event_date===today()).reduce((sum,record)=>sum+numberValue(record.data.amount),0);
   const currentMonth=today().slice(0,7);
-  const monthTotal=dailyRecords.filter(record=>record.event_date.startsWith(currentMonth)).reduce((sum,record)=>sum+Number(record.data.amount||0),0);
+  const monthTotal=dailyRecords.filter(record=>record.event_date.startsWith(currentMonth)).reduce((sum,record)=>sum+numberValue(record.data.amount),0);
   function switchTab(next:'finance'|'dailyexpenses'){setTab(next);setShowForm(false)}
   return <>
     <div className="page-heading"><div><span className="section-kicker section-icon"><FarmIcon name="finance" size={14}/> Farm accounts</span><h1>Income & Expenses</h1><p>Keep the main farm ledger and everyday small expenses together without mixing their dated histories.</p></div><div className="button-row"><button className="button" onClick={()=>downloadSectionPdf(tab,config,filtered)}>Download A4 PDF</button>{canWrite&&<button className="button primary" onClick={()=>setShowForm(true)}>+ Add {tab==='dailyexpenses'?'small expense':'money record'}</button>}</div></div>
