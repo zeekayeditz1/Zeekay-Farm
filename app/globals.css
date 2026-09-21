@@ -112,3 +112,5 @@ button:disabled { opacity:.55; cursor:wait; }
 .livestock-document-panel p { color:var(--muted); font-size:11px; line-height:1.5; margin-top:5px; max-width:720px; }
 @media(max-width:1150px){.livestock-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.livestock-cards{grid-template-columns:1fr}.livestock-document-panel{align-items:stretch;flex-direction:column}.livestock-document-panel .button{width:100%}.livestock-selected{align-items:flex-start;gap:8px;flex-direction:column}}
+
+.archived-panel { margin-top:14px; }
