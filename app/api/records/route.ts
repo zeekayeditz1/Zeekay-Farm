@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
-import { audit, cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
+import { audit, cleanText, db, ensureDatabase, errorResponse, farmDate, isDateOnly, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 
 type RecordRow = {
   id: string; module: string; record_key: string | null; title: string; status: string;
@@ -76,16 +76,34 @@ export async function GET(request: Request) {
     const search = cleanText(url.searchParams.get('search'), 80);
     if (module && !allowedModules.has(module)) return errorResponse('Unknown farm section.');
     if (module && !canAccess(user, permissionModule(module))) return errorResponse('You do not have access to this section.', 403);
-    const clauses = ['r.archived = 0'];
-    const bindings: unknown[] = [];
-    if (module) { clauses.push('r.module = ?'); bindings.push(module); }
-    if (search) { clauses.push('(r.title LIKE ? OR r.record_key LIKE ? OR r.data LIKE ?)'); const term = `%${search}%`; bindings.push(term, term, term); }
+    const archived = url.searchParams.get('archived') === '1' ? 1 : 0;
+    const requestedLimit = Number(url.searchParams.get('limit') || 500);
+    const requestedOffset = Number(url.searchParams.get('offset') || 0);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(500, Math.max(1, Math.trunc(requestedLimit))) : 500;
+    const offset = Number.isFinite(requestedOffset) ? Math.max(0, Math.trunc(requestedOffset)) : 0;
+    const clauses = ['r.archived = ?'];
+    const bindings: unknown[] = [archived];
+    if (module) {
+      clauses.push('r.module = ?');
+      bindings.push(module);
+    } else if (user.role !== 'owner') {
+      const visibleModules = [...allowedModules].filter((name) => canAccess(user, permissionModule(name)));
+      if (!visibleModules.length) return jsonResponse({ records: [], hasMore: false, nextOffset: null });
+      clauses.push(`r.module IN (${visibleModules.map(() => '?').join(',')})`);
+      bindings.push(...visibleModules);
+    }
+    if (search) {
+      clauses.push('(r.title LIKE ? OR r.record_key LIKE ? OR r.data LIKE ?)');
+      const term = `%${search}%`;
+      bindings.push(term, term, term);
+    }
     const result = await db().prepare(
       `SELECT r.*, u.name AS created_by_name FROM records r LEFT JOIN users u ON u.id = r.created_by
-       WHERE ${clauses.join(' AND ')} ORDER BY r.event_date DESC, r.created_at DESC LIMIT 500`,
-    ).bind(...bindings).all<RecordRow>();
-    const visible = user.role === 'owner' ? result.results : result.results.filter((row) => canAccess(user, permissionModule(row.module)));
-    return jsonResponse({ records: visible.map(serialize) });
+       WHERE ${clauses.join(' AND ')} ORDER BY r.event_date DESC, r.created_at DESC LIMIT ? OFFSET ?`,
+    ).bind(...bindings, limit + 1, offset).all<RecordRow>();
+    const page = result.results.slice(0, limit);
+    const hasMore = result.results.length > limit;
+    return jsonResponse({ records: page.map(serialize), hasMore, nextOffset: hasMore ? offset + page.length : null });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
     return errorResponse('Farm records could not be loaded.', 500);
@@ -105,10 +123,11 @@ export async function POST(request: Request) {
     const title = cleanText(body.title, 150);
     const recordKey = cleanText(body.recordKey, 80) || null;
     const status = cleanText(body.status, 30) || 'active';
-    const eventDate = cleanText(body.eventDate, 20) || nowIso().slice(0, 10);
+    const eventDate = cleanText(body.eventDate, 20) || farmDate();
     const linkedId = cleanText(body.linkedId, 80) || null;
     const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : {};
     if (!title) return errorResponse('A record name or title is required.');
+    if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     if (module === 'sales' && recordKey) {
       const animal = await db().prepare("SELECT status FROM records WHERE module = 'animals' AND record_key = ? AND archived = 0").bind(recordKey).first<{status:string}>();
       data.previousAnimalStatus = animal?.status || 'Active';
@@ -129,8 +148,8 @@ export async function POST(request: Request) {
     return jsonResponse({ id }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
-    const message = error instanceof Error && /UNIQUE/i.test(error.message) ? 'That tag or record number is already in use.' : 'The record could not be saved.';
-    return errorResponse(message, 500);
+    if (error instanceof Error && /UNIQUE/i.test(error.message)) return errorResponse('That tag or record number is already in use.', 409);
+    return errorResponse('The record could not be saved.', 500);
   }
 }
 
@@ -151,7 +170,7 @@ export async function PATCH(request: Request) {
       const reminderData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
       const intervalValue = Number(reminderData.intervalValue || reminderData.reminderIntervalValue || 0);
       const intervalUnit = cleanText(reminderData.intervalUnit || reminderData.reminderIntervalUnit, 10) || 'months';
-      const completedDate = nowIso().slice(0, 10);
+      const completedDate = farmDate();
       const nextDate = intervalValue > 0 ? addInterval(completedDate, intervalValue, intervalUnit) : '';
       const now = nowIso();
       const statements = [
@@ -170,8 +189,22 @@ export async function PATCH(request: Request) {
     }
     if (action === 'archive' || action === 'restore') {
       if (!['owner','manager'].includes(user.role)) return errorResponse('Only an owner or manager can archive records.', 403);
-      await db().prepare('UPDATE records SET archived = ?, updated_at = ? WHERE id = ?').bind(action === 'archive' ? 1 : 0, nowIso(), id).run();
-      await audit(user.id, action, existing.module, id, `${action === 'archive' ? 'Archived' : 'Restored'} ${existing.title}`);
+      const now = nowIso();
+      const statements: D1PreparedStatement[] = [
+        db().prepare('UPDATE records SET archived = ?, updated_at = ? WHERE id = ?').bind(action === 'archive' ? 1 : 0, now, id),
+        db().prepare('INSERT INTO audit_log (id,user_id,action,module,record_id,summary,created_at) VALUES (?,?,?,?,?,?,?)')
+          .bind(crypto.randomUUID(), user.id, action, existing.module, id, `${action === 'archive' ? 'Archived' : 'Restored'} ${existing.title}`, now),
+      ];
+      if (existing.module === 'sales' && existing.record_key) {
+        const previousData = JSON.parse(existing.data || '{}') as Record<string, unknown>;
+        if (action === 'archive') {
+          statements.push(resetAnimalExit(existing.record_key, id, now, cleanText(previousData.previousAnimalStatus, 30)));
+        } else {
+          statements.push(db().prepare("UPDATE records SET status = ?, updated_at = ? WHERE module = 'animals' AND record_key = ? AND archived = 0")
+            .bind(existing.status, now, existing.record_key));
+        }
+      }
+      await db().batch(statements);
       return jsonResponse({ ok: true });
     }
     if (action && action !== 'update') return errorResponse('Unknown record action.');
@@ -183,7 +216,7 @@ export async function PATCH(request: Request) {
     const keyField = ({ animals: 'tag', sales: 'animalTag', fields: 'fieldNumber', equipment: 'equipmentName' } as Record<string, string>)[existing.module];
     const recordKey = Object.hasOwn(body, 'recordKey') ? cleanText(body.recordKey, 80) || null : existing.record_key;
     if (keyField && existing.record_key && !recordKey) return errorResponse('A tag or record number is required.');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || Number.isNaN(Date.parse(eventDate))) return errorResponse('Choose a valid record date.');
+    if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     const now = nowIso();
     if (existing.module === 'sales' && recordKey !== existing.record_key) {
       const animal = recordKey ? await db().prepare("SELECT status FROM records WHERE module = 'animals' AND record_key = ? AND archived = 0").bind(recordKey).first<{status:string}>() : null;
