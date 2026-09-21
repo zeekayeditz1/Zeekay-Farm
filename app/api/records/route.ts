@@ -23,6 +23,20 @@ function parseData(value: string) {
   }
 }
 
+function sanitizeIncomingData(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {} as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(value).slice(0, 150)) {
+    const key = rawKey.trim().slice(0, 80);
+    if (!key) continue;
+    if (typeof rawValue === 'string') result[key] = rawValue.slice(0, 5000);
+    else if (typeof rawValue === 'number' && Number.isFinite(rawValue)) result[key] = rawValue;
+    else if (typeof rawValue === 'boolean') result[key] = rawValue ? 'yes' : 'no';
+    else if (rawValue === null) result[key] = '';
+  }
+  return result;
+}
+
 function serialize(row: RecordRow) {
   return { ...row, archived: Boolean(row.archived), data: parseData(row.data) };
 }
@@ -134,7 +148,7 @@ export async function POST(request: Request) {
     const status = cleanText(body.status, 30) || 'active';
     const eventDate = cleanText(body.eventDate, 20) || farmDate();
     const linkedId = cleanText(body.linkedId, 80) || null;
-    const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : {};
+    const data = sanitizeIncomingData(body.data);
     if (!title) return errorResponse('A record name or title is required.');
     if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
     if (module === 'sales' && recordKey) {
@@ -231,7 +245,7 @@ export async function PATCH(request: Request) {
     }
     if (action && action !== 'update') return errorResponse('Unknown record action.');
     const previousData = parseData(existing.data);
-    const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...body.data } : previousData;
+    const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...sanitizeIncomingData(body.data) } : previousData;
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
     const eventDate = cleanText(body.eventDate, 20) || existing.event_date;
