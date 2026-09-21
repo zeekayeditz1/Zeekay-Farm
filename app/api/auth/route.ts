@@ -1,6 +1,35 @@
 import { audit, cleanText, db, ensureDatabase, errorResponse, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
 import { canCreateFirstOwner, createSession, currentUser, destroySession, hashPassword, normalizePhone, prepareSession, verifyPassword } from '@/lib/farm-auth';
 
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 8;
+const loginKeyEncoder = new TextEncoder();
+
+async function loginAttemptKey(request: Request, phone: string) {
+  const ip = cleanText(request.headers.get('CF-Connecting-IP') || request.headers.get('x-forwarded-for') || 'unknown', 100);
+  const digest = await crypto.subtle.digest('SHA-256', loginKeyEncoder.encode(`${phone}|${ip}`));
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function loginBlocked(key: string) {
+  const row = await db().prepare('SELECT blocked_until FROM login_attempts WHERE key = ?').bind(key).first<{blocked_until:string|null}>();
+  return Boolean(row?.blocked_until && Date.parse(row.blocked_until) > Date.now());
+}
+
+async function recordLoginFailure(key: string) {
+  const now = new Date();
+  const row = await db().prepare('SELECT failures, window_started_at FROM login_attempts WHERE key = ?').bind(key)
+    .first<{failures:number;window_started_at:string}>();
+  const windowStart = row?.window_started_at ? Date.parse(row.window_started_at) : 0;
+  const withinWindow = Number.isFinite(windowStart) && now.getTime() - windowStart < LOGIN_WINDOW_MS;
+  const failures = withinWindow ? Number(row?.failures || 0) + 1 : 1;
+  const startedAt = withinWindow && row?.window_started_at ? row.window_started_at : now.toISOString();
+  const blockedUntil = failures >= LOGIN_MAX_FAILURES ? new Date(now.getTime() + LOGIN_WINDOW_MS).toISOString() : null;
+  await db().prepare(`INSERT INTO login_attempts (key, failures, window_started_at, blocked_until) VALUES (?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET failures = excluded.failures, window_started_at = excluded.window_started_at, blocked_until = excluded.blocked_until`)
+    .bind(key, failures, startedAt, blockedUntil).run();
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
@@ -49,6 +78,8 @@ export async function POST(request: Request) {
     }
 
     if (action === 'login') {
+      const attemptKey = await loginAttemptKey(request, phone);
+      if (await loginBlocked(attemptKey)) return errorResponse('Too many failed sign-in attempts. Try again in about 15 minutes.', 429);
       const user = await db().prepare(
         'SELECT id, password_hash, salt FROM users WHERE phone = ? AND active = 1',
       ).bind(phone).first<{ id: string; password_hash: string; salt: string }>();
@@ -56,7 +87,11 @@ export async function POST(request: Request) {
       const valid = user
         ? await verifyPassword(password, user.password_hash, user.salt)
         : await verifyPassword(password, dummy.hash, '00112233445566778899aabbccddeeff').then(() => false);
-      if (!user || !valid) return errorResponse('Phone number or password is incorrect.', 401);
+      if (!user || !valid) {
+        await recordLoginFailure(attemptKey);
+        return errorResponse('Phone number or password is incorrect.', 401);
+      }
+      await db().prepare('DELETE FROM login_attempts WHERE key = ?').bind(attemptKey).run();
       await audit(user.id, 'login', 'users', user.id, 'Signed in');
       return jsonResponse({ ok: true }, 200, { 'Set-Cookie': await createSession(user.id) });
     }
