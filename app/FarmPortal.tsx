@@ -10,7 +10,17 @@ import {
 type User = { id: string; name: string; phone: string; role: string; permissions: string[] };
 type FarmRecord = { id: string; module: string; record_key: string | null; title: string; status: string; event_date: string; linked_id: string | null; data: Record<string, string | number>; created_by_name?: string };
 const UserContext=createContext<User|null>(null);
-function mayWrite(user:User|null, section:string){return Boolean(user&&(user.role==='owner'||user.permissions.includes('*')||user.permissions.includes((section==='dailyexpenses'?'finance':section)+':write')))}
+const permissionSection=(section:string)=>section==='dailyexpenses'?'finance':section;
+function mayRead(user:User|null, section:string){
+  if(!user)return false;
+  const target=permissionSection(section);
+  return user.role==='owner'||user.permissions.includes('*')||user.permissions.includes(`${target}:read`)||user.permissions.includes(`${target}:write`);
+}
+function mayWrite(user:User|null, section:string){
+  if(!user)return false;
+  const target=permissionSection(section);
+  return user.role==='owner'||user.permissions.includes('*')||user.permissions.includes(`${target}:write`);
+}
 
 type Field = { key: string; label: string; type?: 'text'|'number'|'date'|'select'|'textarea'; options?: string[]; required?: boolean; placeholder?: string };
 type ModuleConfig = { label: string; singular: string; description: string; icon: string; fields: Field[]; keyField?: string; titleField: string; statusOptions?: string[] };
@@ -630,11 +640,16 @@ export default function FarmPortal() {
   const config=configs[section];
   const sectionRecords=records.filter(record=>record.module===section && (!search || `${record.title} ${record.record_key||''} ${JSON.stringify(record.data)}`.toLowerCase().includes(search.toLowerCase())));
   const dueReminderCount=records.filter(record=>record.module==='reminders'&&record.event_date<=today()).length;
+  const visibleNav=navOrder.filter(item=>{
+    if(item==='dashboard'||item==='reports')return true;
+    if(item==='users')return auth.user?.role==='owner';
+    return mayRead(auth.user,item);
+  });
   async function logout(){await api('/api/auth',{method:'POST',body:JSON.stringify({action:'logout'})});setAuth({loading:false,setupRequired:false,user:null});}
   return <UserContext.Provider value={auth.user}><main className="app-shell">
     <aside className={`sidebar ${menuOpen?'open':''}`}>
       <div className="brand"><span className="brand-mark"><b>AD</b></span><div><strong>Ali Dairies</strong><small>Farm management</small></div></div>
-      <nav>{navOrder.map(item=>{
+      <nav>{visibleNav.map(item=>{
         const label=configs[item]?.label||navNames[item];
         return <button type="button" title={label} aria-label={label} className={section===item?'active':''} onClick={()=>{setSection(item);setMenuOpen(false);setShowForm(false)}} key={item}><span className="nav-symbol"><FarmIcon name={item}/></span><span>{label}</span>{item==='reminders'&&dueReminderCount>0&&<b className="nav-alert">{dueReminderCount}</b>}</button>;
       })}</nav>
@@ -644,7 +659,7 @@ export default function FarmPortal() {
       <header className="topbar">
         <button className="menu-button" onClick={()=>setMenuOpen(!menuOpen)} aria-label="Open navigation">☰</button>
         <div className="top-search"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search animals, tractors, vaccinations, fields…" /></div>
-        <button className={`notification-button ${dueReminderCount?'has-alert':''}`} onClick={()=>setSection('reminders')} aria-label={`${dueReminderCount} due reminders`}><BellRing size={18}/>{dueReminderCount>0&&<b>{dueReminderCount}</b>}</button>
+        {mayRead(auth.user,'reminders')&&<button className={`notification-button ${dueReminderCount?'has-alert':''}`} onClick={()=>setSection('reminders')} aria-label={`${dueReminderCount} due reminders`}><BellRing size={18}/>{dueReminderCount>0&&<b>{dueReminderCount}</b>}</button>}
         <div className="account"><span className="avatar">{auth.user.name.split(' ').map(p=>p[0]).slice(0,2).join('')}</span><span><strong>{auth.user.name}</strong><small>{auth.user.role}</small></span><button type="button" onClick={logout}>Sign out</button></div>
       </header>
       <div className="page-body">
@@ -662,6 +677,7 @@ export default function FarmPortal() {
 }
 
 function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add?:boolean)=>void}){
+  const user=useContext(UserContext);
   const activeAnimals=records.filter(r=>r.module==='animals'&&!['Sold','Dead','Transferred'].includes(r.status)).length;
   const reminders=records.filter(r=>r.module==='reminders').sort((a,b)=>a.event_date.localeCompare(b.event_date));
   const overdue=reminders.filter(r=>r.event_date<today());
@@ -681,18 +697,18 @@ function Dashboard({records,open}:{records:FarmRecord[];open:(section:string,add
   const upcoming=reminders.slice(0,6);
   const urgent=[...overdue,...dueToday];
   return <>
-    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>Good morning</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><div className="button-row"><button className="button" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button><button className="button primary" onClick={()=>open('animals')}>+ Add animal</button></div></div>
-    {urgent.length>0&&<section className="dashboard-alert" role="status"><span><BellRing size={22}/></span><div><strong>{urgent.length} farm task{urgent.length===1?' needs':'s need'} attention</strong><p>{overdue.length?`${overdue.length} overdue. `:''}{dueToday.length?`${dueToday.length} due today.`:''} Open reminders to complete them and automatically schedule the next repeat.</p></div><button onClick={()=>open('reminders',false)}>Review reminders</button></section>}
+    <div className="page-heading"><div><span className="section-kicker">Farm overview</span><h1>Good morning</h1><p>Vaccinations, gestation checks, tractor service and every repeat task appear here automatically.</p></div><div className="button-row"><button className="button" onClick={()=>downloadFarmReport(records)}>Download A4 PDF</button>{mayWrite(user,'animals')&&<button className="button primary" onClick={()=>open('animals')}>+ Add animal</button>}</div></div>
+    {urgent.length>0&&<section className="dashboard-alert" role="status"><span><BellRing size={22}/></span><div><strong>{urgent.length} farm task{urgent.length===1?' needs':'s need'} attention</strong><p>{overdue.length?`${overdue.length} overdue. `:''}{dueToday.length?`${dueToday.length} due today.`:''} Open reminders to complete them and automatically schedule the next repeat.</p></div>{mayRead(user,'reminders')&&<button onClick={()=>open('reminders',false)}>Review reminders</button>}</section>}
     <div className="metric-grid">{cards.map(([label,value,note])=><article className="metric" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</div>
     <div className="content-grid">
       <section className="panel span-2"><div className="panel-heading"><div><span className="section-kicker">Daily work</span><h2>Recent farm activity</h2></div></div>{recent.length?<div className="activity-list">{recent.map(r=><div className="activity" key={r.id}><span className="activity-icon"><FarmIcon name={r.module} size={15}/></span><div><strong>{r.title}</strong><small>{configs[r.module]?.label||r.module} · {r.event_date}</small></div><span className="status-chip">{r.status}</span></div>)}</div>:<Empty title="You’re ready to begin" text="Add the first animal, field, worker, expense or maintenance record."/>}</section>
-      <section className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>Reminders</h2></div><button onClick={()=>open('reminders',false)}>View all</button></div>{upcoming.length?<div>{upcoming.map(r=>{const state=r.event_date<today()?'overdue':r.event_date===today()?'today':'upcoming';return <div className={`reminder-row ${state}`} key={r.id}><span>{state==='overdue'?'Overdue':state==='today'?'Due today':r.event_date}</span><strong>{r.title}</strong><small>{String(r.data.linkedReference||r.data.sourceModule||'Farm task')}</small></div>})}</div>:<Empty title="No reminders" text="Add a repeat interval to any record and its next due date will appear here." compact/>}</section>
+      <section className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>Reminders</h2></div>{mayRead(user,'reminders')&&<button onClick={()=>open('reminders',false)}>View all</button>}</div>{upcoming.length?<div>{upcoming.map(r=>{const state=r.event_date<today()?'overdue':r.event_date===today()?'today':'upcoming';return <div className={`reminder-row ${state}`} key={r.id}><span>{state==='overdue'?'Overdue':state==='today'?'Due today':r.event_date}</span><strong>{r.title}</strong><small>{String(r.data.linkedReference||r.data.sourceModule||'Farm task')}</small></div>})}</div>:<Empty title="No reminders" text="Add a repeat interval to any record and its next due date will appear here." compact/>}</section>
     </div>
     <div className="quick-grid">
-      <button onClick={()=>open('health')}><b><Syringe size={16}/></b><span><strong>Vaccination</strong><small>Medicine, next dose and repeat</small></span></button>
-      <button onClick={()=>open('breeding')}><b><Baby size={16}/></b><span><strong>Gestation check</strong><small>Pregnancy and expected calving</small></span></button>
-      <button onClick={()=>open('maintenance')}><b><Wrench size={16}/></b><span><strong>Service / repair</strong><small>Tractor, parts, expense and next due</small></span></button>
-      <button onClick={()=>open('weights')}><b><Scale size={16}/></b><span><strong>Estimate weight</strong><small>Girth, length and daily feed</small></span></button>
+      {mayRead(user,'health')&&<button onClick={()=>open('health',mayWrite(user,'health'))}><b><Syringe size={16}/></b><span><strong>Vaccination</strong><small>Medicine, next dose and repeat</small></span></button>}
+      {mayRead(user,'breeding')&&<button onClick={()=>open('breeding',mayWrite(user,'breeding'))}><b><Baby size={16}/></b><span><strong>Gestation check</strong><small>Pregnancy and expected calving</small></span></button>}
+      {mayRead(user,'maintenance')&&<button onClick={()=>open('maintenance',mayWrite(user,'maintenance'))}><b><Wrench size={16}/></b><span><strong>Service / repair</strong><small>Tractor, parts, expense and next due</small></span></button>}
+      {mayRead(user,'weights')&&<button onClick={()=>open('weights',mayWrite(user,'weights'))}><b><Scale size={16}/></b><span><strong>Estimate weight</strong><small>Girth, length and daily feed</small></span></button>}
     </div>
   </>;
 }
