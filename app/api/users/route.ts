@@ -20,7 +20,16 @@ export async function GET(request: Request) {
     const user = await requireUser(request);
     if (user.role !== 'owner') return errorResponse('Only owners can manage portal users.', 403);
     const result = await db().prepare('SELECT id, name, phone, role, permissions, active, created_at, last_login_at FROM users WHERE active <> 2 ORDER BY created_at').all();
-    return jsonResponse({ users: result.results.map((row) => ({ ...row, permissions: JSON.parse(String(row.permissions || '[]')) })) });
+    return jsonResponse({ users: result.results.map((row) => {
+      let permissions: string[] = [];
+      try {
+        const parsed = JSON.parse(String(row.permissions || '[]'));
+        if (Array.isArray(parsed)) permissions = parsed.filter((item): item is string => typeof item === 'string');
+      } catch {
+        permissions = [];
+      }
+      return { ...row, permissions };
+    }) });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
     return errorResponse('Users could not be loaded.', 500);
