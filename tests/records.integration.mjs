@@ -39,7 +39,8 @@ function check(value,message){assert.ok(value,message);checks++;}
 try {
   // eslint-disable-next-line @next/next/no-assign-module-variable -- Farm section name.
   for(const module of ['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']){
-    const id=await add(module,{notes:'Original',amount:'10',customMetadata:'preserve'});
+    const crudKey=['animals','sales'].includes(module)?prefix+'-'+module+'-crud':null;
+    const id=await add(module,{notes:'Original',amount:'10',customMetadata:'preserve'},crudKey);
     await request('/api/records','PATCH',{id,title:'Edited '+module,eventDate:'2026-09-20',data:{notes:'Edited',amount:'25'}});
     const edited=await get(id);
     check(edited.title==='Edited '+module&&edited.data.notes==='Edited'&&edited.data.amount==='25'&&edited.data.customMetadata==='preserve'&&edited.event_date==='2026-09-20',module+' edit persisted');
