@@ -7,6 +7,7 @@ Live portal: <https://portal.hwf.zeekayeditz.com>
 ## Included sections
 
 - Dashboard and reminders
+- Notes with separate text and table tabs, create/edit/delete controls, and shared database persistence
 - Animal profiles and permanent lifecycle history
 - Separate cow, bull, female goat, male goat and hen sections with present counts, young-stock counts and editable current worth
 - Branded A4 PDF exports across every portal section, including livestock worth sheets with section totals and full animal details
@@ -45,3 +46,11 @@ Cloudflare resource identifiers in the deployment configuration are public bindi
 Production requests are permanently redirected from HTTP to HTTPS and receive HSTS and standard browser security headers.
 
 Password verification uses a private Cloudflare Worker HMAC pepper, secure cookies and constant-time comparison. The pepper is stored only as a Cloudflare secret and is never committed to source control.
+
+## Farm notes
+
+Open **Notes** in the sidebar and choose **Create new note**. Choose **Text note** for plain writing or **Table note** for an editable grid. Each type has its own tab; the portal search searches note titles and contents. Click **Save note** to save changes. Unsaved changes trigger a discard warning when leaving the editor, and failed saves retain the draft for retry. Deletion requires confirmation.
+
+Text notes support 50,000 characters. Tables support up to 200 rows and 20 columns, editable headings, and adding/removing rows and columns. Table contents are limited to 100,000 serialized characters; headings to 80 characters and cells to 500. These are in-portal editors; Office file import/export and spreadsheet formulas are not included.
+
+Notes use the existing records database, audit history and owner backup. Owners have access automatically; other accounts require `notes:read` or `notes:write`. Saving a manager or viewer account in Users & Access includes Notes with the matching access level. Existing account permissions are preserved until the owner edits them.

@@ -1,3 +1,4 @@
+import { NoteValidationError, sanitizeNoteData } from '@/lib/farm-notes';
 import { env } from 'cloudflare:workers';
 import { AuthError, canAccess, requireUser } from '@/lib/farm-auth';
 import { cleanText, db, ensureDatabase, errorResponse, farmDate, isDateOnly, jsonResponse, nowIso, validateOrigin } from '@/lib/farm-db';
@@ -8,7 +9,7 @@ type RecordRow = {
   created_at: string; updated_at: string; created_by_name?: string;
 };
 
-const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']);
+const allowedModules = new Set(['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders','notes']);
 const keyRequiredModules = new Set(['animals','sales']);
 const statusRules: Record<string, Set<string>> = {
   animals: new Set(['Active','Quarantine','Sick','Pregnant','Sold','Dead','Transferred']),
@@ -144,6 +145,7 @@ export async function GET(request: Request) {
     return jsonResponse({ records: page.map(serialize), hasMore, nextOffset: hasMore ? offset + page.length : null });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
+    if (error instanceof NoteValidationError) return errorResponse(error.message);
     return errorResponse('Farm records could not be loaded.', 500);
   }
 }
@@ -165,7 +167,7 @@ export async function POST(request: Request) {
     if (!validStatus(module, status)) return errorResponse('Choose a valid record status.');
     const eventDate = cleanText(body.eventDate, 20) || farmDate();
     const linkedId = cleanText(body.linkedId, 80) || null;
-    const data = sanitizeIncomingData(body.data);
+    const data = module === 'notes' ? sanitizeNoteData(body.data) : sanitizeIncomingData(body.data);
     if (!title) return errorResponse('A record name or title is required.');
     if (keyRequiredModules.has(module) && !recordKey) return errorResponse('A tag or record number is required.');
     if (!isDateOnly(eventDate)) return errorResponse('Choose a valid record date.');
@@ -199,6 +201,7 @@ export async function POST(request: Request) {
     return jsonResponse({ id }, 201);
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
+    if (error instanceof NoteValidationError) return errorResponse(error.message);
     if (error instanceof Error && /UNIQUE/i.test(error.message)) return errorResponse('That tag or record number is already in use.', 409);
     return errorResponse('The record could not be saved.', 500);
   }
@@ -263,7 +266,9 @@ export async function PATCH(request: Request) {
     }
     if (action && action !== 'update') return errorResponse('Unknown record action.');
     const previousData = parseData(existing.data);
-    const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...sanitizeIncomingData(body.data) } : previousData;
+    const data = existing.module === 'notes'
+      ? sanitizeNoteData({ ...previousData, ...(body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : {}) })
+      : body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? { ...previousData, ...sanitizeIncomingData(body.data) } : previousData;
     const title = cleanText(body.title, 150) || existing.title;
     const status = cleanText(body.status, 30) || existing.status;
     if (!validStatus(existing.module, status)) return errorResponse('Choose a valid record status.');
@@ -317,6 +322,7 @@ export async function PATCH(request: Request) {
     return jsonResponse({ ok: true, id });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
+    if (error instanceof NoteValidationError) return errorResponse(error.message);
     if (error instanceof Error && /UNIQUE/i.test(error.message)) return errorResponse('That tag or record number is already in use.', 409);
     return errorResponse('The record could not be updated.', 500);
   }
@@ -354,6 +360,7 @@ export async function DELETE(request: Request) {
     return jsonResponse({ ok: true });
   } catch (error) {
     if (error instanceof AuthError) return errorResponse(error.message, error.status);
+    if (error instanceof NoteValidationError) return errorResponse(error.message);
     return errorResponse('The record could not be deleted.', 500);
   }
 }

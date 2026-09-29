@@ -37,10 +37,48 @@ async function get(id){return (await records()).find(record=>record.id===id);}
 let checks=0;
 function check(value,message){assert.ok(value,message);checks++;}
 try {
+  // Notes preserve long text, Unicode, empty cells and numeric strings exactly.
+  const longText = 'Important farm information\n' + 'Ã˜Â§Ã˜Â±Ã˜Â¯Ã™Ë† 0123 <script>plain text</script> '.repeat(350);
+  const textNote = await add('notes', {noteType:'text',content:longText});
+  check((await get(textNote)).data.content === longText, 'Long text note round trip has no truncation');
+  await request('/api/records','PATCH',{id:textNote,title:'Updated farm instructions',data:{content:longText+'\nEdited'}});
+  check((await get(textNote)).data.content === longText+'\nEdited', 'Text note edit persisted');
+  const tableData = JSON.stringify({columns:['Item','Quantity','Amount'],rows:Array.from({length:200},(_,i)=>['Feed batch reference '+i,'0012','0.25'])});
+  check(tableData.length > 5000, 'Large table test exceeds the generic field limit');
+  const tableNote = await add('notes',{noteType:'table',table:tableData});
+  check((await get(tableNote)).data.table === tableData, 'Table larger than generic field limit round trips exactly');
+  const updatedTable = JSON.stringify({columns:['Name','Amount'],rows:[['Ã˜Â§Ã˜Â±Ã˜Â¯Ã™Ë†','00123'],['','-1.50']]});
+  await request('/api/records','PATCH',{id:tableNote,data:{table:updatedTable}});
+  check((await get(tableNote)).data.table === updatedTable, 'Table edits preserve Unicode, blank cells and numeric strings');
+  await request('/api/records','POST',{module:'notes',title:'Invalid',data:{noteType:'table',table:'broken'}},400);
+  await request('/api/records','PATCH',{id:tableNote,data:{table:JSON.stringify({columns:['A'],rows:[['x','y']]})}},400);
+  check((await get(tableNote)).data.table === updatedTable, 'Invalid table update leaves saved note intact');
+  await request('/api/records','POST',{module:'notes',title:'Too long',data:{noteType:'text',content:'x'.repeat(50001)}},400);
+  await request('/api/records','POST',{module:'notes',title:'No type',data:{content:'text'}},400);
+  await request('/api/records','GET',undefined,401,'');
+  const noteViewerId=randomUUID(), noNotesId=randomUUID();
+  for (const [id,permissions] of [[noteViewerId,['notes:read']],[noNotesId,['animals:write']]]) {
+    db.prepare('INSERT INTO users (id,name,phone,password_hash,salt,role,permissions,created_at) VALUES (?,?,?,?,?,?,?,?)').run(id,'QA notes permissions',phone+(id===noteViewerId?'91':'92'),hash,salt,'viewer',JSON.stringify(permissions),now);
+    const loginResult=await request('/api/auth','POST',{action:'login',phone:phone+(id===noteViewerId?'91':'92'),password});
+    const session=loginResult.response.headers.get('set-cookie').split(';')[0];
+    await request('/api/records?module=notes','GET',undefined,id===noteViewerId?200:403,session);
+    const allowed=(await request('/api/records','GET',undefined,200,session)).result.records;
+    check(id===noteViewerId ? allowed.some(r=>r.id===textNote) : !allowed.some(r=>r.module==='notes'),'Notes list respects account permissions');
+    await request('/api/records','POST',{module:'notes',title:'Blocked',data:{noteType:'text',content:'Blocked'}},403,session);
+    await request('/api/records','PATCH',{id:textNote,data:{content:'Blocked'}},403,session);
+    await request('/api/records','DELETE',{id:textNote},403,session);
+  }
+  const backup=(await request('/api/backup')).result;
+  check(JSON.stringify(backup).includes('Updated farm instructions'), 'Owner backup includes notes');
+  for (const id of [textNote,tableNote]) {
+    await request('/api/records','DELETE',{id});
+    check(!await get(id),'Deleted note disappears');
+    await request('/api/records','PATCH',{id,data:{content:'Cannot revive'}},404);
+  }
   // eslint-disable-next-line @next/next/no-assign-module-variable -- Farm section name.
   for(const module of ['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','dailyexpenses','reminders']){
     const crudKey=['animals','sales'].includes(module)?prefix+'-'+module+'-crud':null;
-    const id=await add(module,{notes:'Original',amount:'10',customMetadata:'preserve'},crudKey);
+    const id=await add(module,{notes:'Original',amount:'10',customMetadata:'preserve'},crudKey,module==='sales'?'Sold':'Active');
     await request('/api/records','PATCH',{id,title:'Edited '+module,eventDate:'2026-09-20',data:{notes:'Edited',amount:'25'}});
     const edited=await get(id);
     check(edited.title==='Edited '+module&&edited.data.notes==='Edited'&&edited.data.amount==='25'&&edited.data.customMetadata==='preserve'&&edited.event_date==='2026-09-20',module+' edit persisted');
@@ -136,7 +174,7 @@ try {
   await request('/api/records','PATCH',{id:other,action:'archive'});
   await request('/api/records','PATCH',{id:other,action:'restore'});
   check(Boolean(await get(other)),'Existing archive and restore behavior still works');
-  console.log('All 14 modules, linked history, reminders, accounts, attachments, and access checks passed.');
+  console.log('Notes plus all 14 existing modules, linked history, reminders, accounts, attachments, and access checks passed.');
 } catch(error) {
   console.error(error);process.exitCode=1;
 } finally {

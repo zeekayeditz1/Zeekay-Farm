@@ -114,3 +114,48 @@ button:disabled { opacity:.55; cursor:wait; }
 @media(max-width:720px){.livestock-cards{grid-template-columns:1fr}.livestock-document-panel{align-items:stretch;flex-direction:column}.livestock-document-panel .button{width:100%}.livestock-selected{align-items:flex-start;gap:8px;flex-direction:column}}
 
 .archived-panel { margin-top:14px; }
+
+/* Farm notebook: document and spreadsheet workspaces. */
+.notes-workspace .button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+.notes-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+.note-card { display:flex; flex-direction:column; min-width:0; padding:22px; }
+.note-card-icon { color:var(--green); background:var(--leaf); padding:10px; border-radius:10px; align-self:flex-start; margin-bottom:15px; }
+.note-card h2 { font-size:18px; overflow-wrap:anywhere; }
+.note-preview { color:var(--muted); font-size:13px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; margin:12px 0; min-height:65px; }
+.note-card small { color:var(--muted); font-size:11px; margin-top:auto; }
+.note-card-actions { display:flex; justify-content:space-between; align-items:center; gap:10px; border-top:1px solid var(--line); padding-top:14px; margin-top:15px; }
+.notes-empty { padding:55px 22px; text-align:center; color:var(--muted); }
+.notes-empty svg { margin:0 auto 16px; color:var(--green); }
+.notes-empty h2 { color:var(--ink); font-size:21px; }
+.notes-empty p { margin:12px 0 22px; font-size:14px; }
+.notes-empty .button svg { margin:0; color:inherit; }
+.note-editor { padding:24px; }
+.note-editor fieldset { border:0; padding:0; margin:0; min-width:0; }
+.note-editor input { font-size:15px; }
+.note-editor-status { display:flex; justify-content:space-between; gap:12px; color:var(--muted); font-size:12px; padding:15px 0; }
+.note-content-label { display:block; }
+.note-editor .note-paper { display:block; width:100%; min-height:430px; padding:25px; margin-top:10px; font-size:16px; line-height:1.85; resize:vertical; border:1px solid var(--line); border-radius:10px; background:#fffefa; }
+.note-hint { font-size:12px; color:var(--muted); margin:12px 0; }
+.note-table-tools { align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.note-sheet { max-height:60vh; border:1px solid var(--line); border-radius:10px; }
+.note-sheet table { width:max-content; min-width:100%; }
+.note-sheet thead { position:sticky; top:0; z-index:1; background:#edf4ed; }
+.note-sheet td,.note-sheet th { border:1px solid var(--line); padding:0; }
+.note-sheet th:first-child { min-width:42px; text-align:center; }
+.note-sheet td:last-child { text-align:center; }
+.note-sheet input { border:0; border-radius:0; background:transparent; margin:0; padding:12px; width:160px; min-height:44px; }
+.note-sheet input:focus { outline:2px solid var(--green); outline-offset:-2px; background:white; }
+.note-column { display:flex; align-items:center; }
+.note-column input { font-weight:700; }
+.note-column button { background:transparent; border:0; color:var(--muted); padding:8px; }
+.note-editor-footer { display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--line); padding-top:18px; margin-top:20px; }
+.note-type-dialog { margin:auto; width:min(620px,calc(100vw - 32px)); max-height:90vh; overflow:auto; padding:25px; border:1px solid var(--line); border-radius:18px; color:var(--ink); box-shadow:0 24px 80px #0003; }
+.note-type-dialog::backdrop { background:rgba(11,27,17,.62); }
+.note-type-dialog header { display:flex; align-items:center; justify-content:space-between; gap:15px; }
+.note-type-dialog h2 { font-size:24px; margin-top:6px; }
+.note-type-options { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:25px; }
+.note-type-options button { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:14px; border:1px solid var(--line); background:#f6f9f3; border-radius:12px; padding:22px; color:var(--green); }
+.note-type-options button:hover { border-color:var(--green); background:var(--leaf); }
+.note-type-options strong { font-size:19px; }
+.note-type-options span { font-size:13px; line-height:1.65; color:var(--muted); }
+@media(max-width:720px) { .note-type-options { grid-template-columns:1fr; } .note-editor { padding:16px; } .note-editor .note-paper { padding:15px; min-height:350px; } }

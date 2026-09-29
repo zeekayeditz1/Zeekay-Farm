@@ -1,9 +1,10 @@
 'use client';
 
+import NotesPage from './NotesPage';
 import { createContext, useContext, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Baby, BadgeDollarSign, Beef, BellRing, CalendarClock, ChartNoAxesCombined,
-  CircleUserRound, LayoutDashboard, Milk, Scale,
+  CircleUserRound, LayoutDashboard, Milk, Scale, NotebookPen,
   ShieldCheck, Sprout, Syringe, Tractor, UsersRound, WalletCards, Wheat, Wrench,
 } from 'lucide-react';
 
@@ -525,6 +526,7 @@ async function downloadUsersPdf(users:Array<Record<string,unknown>>){
 }
 
 const navIcons: Record<string, typeof LayoutDashboard> = {
+  notes: NotebookPen,
   dashboard: LayoutDashboard,
   animals: Beef,
   sales: BadgeDollarSign,
@@ -600,8 +602,8 @@ const configs: Record<string, ModuleConfig> = {
     {key:'task',label:'Task / reminder',required:true}, {key:'nextDate',label:'Due date',type:'date',required:true}, {key:'category',label:'Category',type:'select',options:['Vaccination / medicine','Gestation / breeding','Maintenance / renovation','Crop','Equipment','Labour','Other']}, {key:'linkedReference',label:'Linked animal / asset / field / worker'}, {key:'notes',label:'Instructions',type:'textarea'} ] },
 };
 
-const navOrder = ['dashboard','animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders','reports','users'];
-const navNames: Record<string,string> = { dashboard:'Dashboard', reports:'Reports', users:'Users & Access' };
+const navOrder = ['dashboard','animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','notes','reminders','reports','users'];
+const navNames: Record<string,string> = { notes:'Notes', dashboard:'Dashboard', reports:'Reports', users:'Users & Access' };
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...options, headers: { ...(options?.body instanceof FormData ? {} : { 'Content-Type':'application/json' }), ...options?.headers } });
@@ -662,7 +664,7 @@ export default function FarmPortal() {
     <section className="workspace">
       <header className="topbar">
         <button className="menu-button" onClick={()=>setMenuOpen(!menuOpen)} aria-label="Open navigation">☰</button>
-        <div className="top-search"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search animals, tractors, vaccinations, fields…" /></div>
+        <div className="top-search"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search animals, notes, vaccinations, fields…" /></div>
         {mayRead(auth.user,'reminders')&&<button className={`notification-button ${dueReminderCount?'has-alert':''}`} onClick={()=>setSection('reminders')} aria-label={`${dueReminderCount} due reminders`}><BellRing size={18}/>{dueReminderCount>0&&<b>{dueReminderCount}</b>}</button>}
         <div className="account"><span className="avatar">{auth.user.name.split(' ').map(p=>p[0]).slice(0,2).join('')}</span><span><strong>{auth.user.name}</strong><small>{auth.user.role}</small></span><button type="button" onClick={logout}>Sign out</button></div>
       </header>
@@ -672,6 +674,7 @@ export default function FarmPortal() {
         {section==='animals'&&config&&<AnimalsPage records={sectionRecords} summaryRecords={records.filter(record=>record.module==='animals')} config={config} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
         {config&&section!=='finance'&&section!=='animals'&&<ModulePage key={section} module={section} config={config} records={sectionRecords} onAdd={()=>setShowForm(true)} refresh={loadRecords} notify={setMessage}/>}
         {section==='finance'&&<FinancePage records={records} search={search} refresh={loadRecords} notify={setMessage}/>}
+        {section==='notes'&&<NotesPage canWrite={mayWrite(auth.user,'notes')} search={search} notify={setMessage}/>}
         {section==='reports'&&<Reports records={records}/>}
         {section==='users'&&<Users currentUser={auth.user} notify={setMessage}/>}
       </div>
@@ -912,7 +915,7 @@ function Users({currentUser,notify}:{currentUser:User;notify:(s:string)=>void}){
   async function save(e:FormEvent){
     e.preventDefault();setBusy(true);setError('');
     try{
-      const sections=['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','reminders'];
+      const sections=['animals','sales','weights','health','breeding','milk','fields','gur','labour','equipment','maintenance','finance','notes','reminders'];
       const scoped=form.role==='accountant'?['finance','labour','sales']:form.role==='vet'?['animals','weights','health','breeding','reminders']:form.role==='worker'?['animals','weights','health','breeding','maintenance','reminders']:sections;
       const permissions=form.role==='owner'?['*']:scoped.flatMap(section=>form.role==='viewer'?[section+':read']:[section+':read',section+':write']);
       await api('/api/users',{method:editing?'PATCH':'POST',body:JSON.stringify({...form,id:editing||undefined,permissions})});setShow(false);await load();notify(editing?'User changes saved.':'Portal user added.');
